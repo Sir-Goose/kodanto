@@ -32,6 +32,15 @@ final class KodantoAppModel {
 
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
+    private var globalEventTask: Task<Void, Never>?
+    private var heartbeatWatchdogTask: Task<Void, Never>?
+    private var lastEventAt = Date.distantPast
+    private var didBootstrapLiveSync = false
+    private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
+    private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
+
+    private let heartbeatTimeout: Duration = .seconds(15)
+    private let reconnectDelay: Duration = .milliseconds(250)
 
     init() {
         profiles = storage.load()
@@ -73,7 +82,12 @@ final class KodantoAppModel {
         selectedSession != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var isLiveSyncActive: Bool {
+        globalEventTask != nil
+    }
+
     func selectProfile(_ profileID: ServerProfile.ID) {
+        stopLiveSync()
         selectedProfileID = profileID
         connectionState = .idle
         projects = []
@@ -85,6 +99,8 @@ final class KodantoAppModel {
         permissions = []
         questions = []
         pathInfo = nil
+        didBootstrapLiveSync = false
+        resetMessageCaches()
     }
 
     func saveProfile(_ profile: ServerProfile) {
@@ -120,6 +136,7 @@ final class KodantoAppModel {
     func connectSelectedProfile() async {
         guard let profile = selectedProfile else { return }
         connectionState = .connecting
+        stopLiveSync()
 
         do {
             let client = OpenCodeAPIClient(profile: profile)
@@ -134,6 +151,7 @@ final class KodantoAppModel {
             let health = try await client.health()
             connectionState = .connected(version: health.version)
             try await refreshAll(using: client)
+            startLiveSync(for: profile)
         } catch {
             connectionState = .failed(error.localizedDescription)
         }
@@ -271,6 +289,8 @@ final class KodantoAppModel {
 
         if let project = selectedProject {
             try await loadSessions(for: project, using: client)
+        } else {
+            resetMessageCaches()
         }
     }
 
@@ -305,6 +325,7 @@ final class KodantoAppModel {
         questions = try await questionsTask
 
         guard let session = selectedSession else {
+            resetMessageCaches()
             selectedSessionMessages = []
             sessionTodos = []
             return
@@ -313,8 +334,277 @@ final class KodantoAppModel {
         async let messagesTask = client.messages(sessionID: session.id, directory: project.worktree)
         async let todosTask = client.sessionTodos(sessionID: session.id, directory: project.worktree)
 
-        selectedSessionMessages = try await messagesTask
+        replaceMessages(try await messagesTask)
         sessionTodos = try await todosTask
+    }
+
+    private func startLiveSync(for profile: ServerProfile) {
+        globalEventTask?.cancel()
+        heartbeatWatchdogTask?.cancel()
+        didBootstrapLiveSync = false
+        lastEventAt = .now
+
+        globalEventTask = Task { [weak self] in
+            guard let self else { return }
+
+            while !Task.isCancelled {
+                do {
+                    if didBootstrapLiveSync {
+                        try await refreshAll(using: OpenCodeAPIClient(profile: profile))
+                    } else {
+                        didBootstrapLiveSync = true
+                    }
+
+                    let sse = OpenCodeSSEClient(profile: profile)
+                    startHeartbeatWatchdog(for: profile)
+
+                    for try await event in sse.streamGlobalEvents() {
+                        if Task.isCancelled { return }
+                        lastEventAt = .now
+                        applyGlobalEvent(event)
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    if Task.isCancelled { return }
+                    connectionState = .failed(error.localizedDescription)
+                }
+
+                stopHeartbeatWatchdog()
+                if Task.isCancelled { return }
+                try? await Task.sleep(for: reconnectDelay)
+            }
+        }
+    }
+
+    private func stopLiveSync() {
+        globalEventTask?.cancel()
+        globalEventTask = nil
+        stopHeartbeatWatchdog()
+    }
+
+    private func startHeartbeatWatchdog(for profile: ServerProfile) {
+        heartbeatWatchdogTask?.cancel()
+        heartbeatWatchdogTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { return }
+                guard connectionState.isConnected else { continue }
+                guard lastEventAt.addingTimeInterval(15) < .now else { continue }
+                connectionState = .failed("Live sync disconnected. Reconnecting...")
+                globalEventTask?.cancel()
+                startLiveSync(for: profile)
+                return
+            }
+        }
+    }
+
+    private func stopHeartbeatWatchdog() {
+        heartbeatWatchdogTask?.cancel()
+        heartbeatWatchdogTask = nil
+    }
+
+    private func applyGlobalEvent(_ event: OpenCodeGlobalEvent) {
+        let directory = event.directory ?? "global"
+
+        switch event.payload {
+        case .serverConnected:
+            break
+        case .serverHeartbeat:
+            break
+        case .globalDisposed:
+            refresh()
+        case .projectUpdated(let project):
+            upsertProject(project)
+        default:
+            guard let selectedProject, directory == selectedProject.worktree || directory == selectedProject.id else { return }
+            applyDirectoryEvent(event.payload)
+        }
+    }
+
+    private func applyDirectoryEvent(_ event: OpenCodeEvent) {
+        switch event {
+        case .sessionCreated(let payload):
+            upsertSession(payload.info)
+        case .sessionUpdated(let payload):
+            upsertSession(payload.info)
+        case .sessionDeleted(let payload):
+            removeSession(payload.info)
+        case .sessionStatus(let payload):
+            sessionStatuses[payload.sessionID] = payload.status
+        case .todoUpdated(let payload):
+            guard payload.sessionID == selectedSessionID else { return }
+            sessionTodos = payload.todos
+        case .messageUpdated(let payload):
+            upsertMessage(payload.info)
+        case .messageRemoved(let payload):
+            removeMessage(sessionID: payload.sessionID, messageID: payload.messageID)
+        case .messagePartUpdated(let payload):
+            upsertPart(payload.part)
+        case .messagePartDelta(let payload):
+            applyPartDelta(payload)
+        case .messagePartRemoved(let payload):
+            removePart(messageID: payload.messageID, partID: payload.partID)
+        case .permissionAsked(let payload):
+            upsertPermission(payload)
+        case .permissionReplied(let payload):
+            removePermission(sessionID: payload.sessionID, requestID: payload.requestID)
+        case .questionAsked(let payload):
+            upsertQuestion(payload)
+        case .questionReplied(let payload), .questionRejected(let payload):
+            removeQuestion(sessionID: payload.sessionID, requestID: payload.requestID)
+        default:
+            break
+        }
+    }
+
+    private func upsertProject(_ project: OpenCodeProject) {
+        if let index = projects.firstIndex(where: { $0.id == project.id }) {
+            projects[index] = project
+        } else {
+            projects.append(project)
+            projects.sort { $0.time.updated > $1.time.updated }
+        }
+    }
+
+    private func upsertSession(_ session: OpenCodeSession) {
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            sessions[index] = session
+        } else {
+            sessions.append(session)
+        }
+
+        sessions.sort { $0.time.updated > $1.time.updated }
+
+        if selectedSessionID == nil {
+            selectedSessionID = session.id
+        }
+    }
+
+    private func removeSession(_ session: OpenCodeSession) {
+        sessions.removeAll { $0.id == session.id }
+        sessionStatuses.removeValue(forKey: session.id)
+        if selectedSessionID == session.id {
+            selectedSessionID = sessions.first?.id
+            if selectedSessionID == nil {
+                resetMessageCaches()
+                selectedSessionMessages = []
+                sessionTodos = []
+            } else {
+                rebuildSelectedSessionMessages()
+            }
+        }
+    }
+
+    private func replaceMessages(_ envelopes: [OpenCodeMessageEnvelope]) {
+        resetMessageCaches()
+        for envelope in envelopes {
+            sessionMessagesByID[envelope.id] = envelope.info
+            messagePartsByMessageID[envelope.id] = envelope.parts.sorted(by: sortParts)
+        }
+        rebuildSelectedSessionMessages()
+    }
+
+    private func upsertMessage(_ message: OpenCodeMessage) {
+        guard message.sessionID == selectedSessionID else { return }
+        sessionMessagesByID[message.id] = message
+        if messagePartsByMessageID[message.id] == nil {
+            messagePartsByMessageID[message.id] = []
+        }
+        rebuildSelectedSessionMessages()
+    }
+
+    private func removeMessage(sessionID: String, messageID: String) {
+        guard sessionID == selectedSessionID else { return }
+        sessionMessagesByID.removeValue(forKey: messageID)
+        messagePartsByMessageID.removeValue(forKey: messageID)
+        rebuildSelectedSessionMessages()
+    }
+
+    private func upsertPart(_ part: OpenCodePart) {
+        guard part.sessionID == selectedSessionID else { return }
+        var parts = messagePartsByMessageID[part.messageID] ?? []
+        if let index = parts.firstIndex(where: { $0.id == part.id }) {
+            parts[index] = part
+        } else {
+            parts.append(part)
+        }
+        messagePartsByMessageID[part.messageID] = parts.sorted(by: sortParts)
+        rebuildSelectedSessionMessages()
+    }
+
+    private func applyPartDelta(_ payload: OpenCodeEvent.MessagePartDeltaPayload) {
+        guard payload.sessionID == selectedSessionID else { return }
+        guard var parts = messagePartsByMessageID[payload.messageID],
+              let index = parts.firstIndex(where: { $0.id == payload.partID }),
+              let updated = parts[index].applyingDelta(field: payload.field, delta: payload.delta)
+        else { return }
+
+        parts[index] = updated
+        messagePartsByMessageID[payload.messageID] = parts
+        rebuildSelectedSessionMessages()
+    }
+
+    private func removePart(messageID: String, partID: String) {
+        guard var parts = messagePartsByMessageID[messageID] else { return }
+        parts.removeAll { $0.id == partID }
+        messagePartsByMessageID[messageID] = parts
+        rebuildSelectedSessionMessages()
+    }
+
+    private func upsertPermission(_ request: OpenCodePermissionRequest) {
+        guard request.sessionID == selectedSessionID else { return }
+        if let index = permissions.firstIndex(where: { $0.id == request.id }) {
+            permissions[index] = request
+        } else {
+            permissions.append(request)
+        }
+    }
+
+    private func removePermission(sessionID: String, requestID: String) {
+        guard sessionID == selectedSessionID else { return }
+        permissions.removeAll { $0.id == requestID }
+    }
+
+    private func upsertQuestion(_ request: OpenCodeQuestionRequest) {
+        guard request.sessionID == selectedSessionID else { return }
+        if let index = questions.firstIndex(where: { $0.id == request.id }) {
+            questions[index] = request
+        } else {
+            questions.append(request)
+        }
+    }
+
+    private func removeQuestion(sessionID: String, requestID: String) {
+        guard sessionID == selectedSessionID else { return }
+        questions.removeAll { $0.id == requestID }
+    }
+
+    private func rebuildSelectedSessionMessages() {
+        guard let selectedSessionID else {
+            selectedSessionMessages = []
+            return
+        }
+
+        selectedSessionMessages = sessionMessagesByID.values
+            .filter { $0.sessionID == selectedSessionID }
+            .sorted { $0.createdAt < $1.createdAt }
+            .map { message in
+                OpenCodeMessageEnvelope(
+                    info: message,
+                    parts: (messagePartsByMessageID[message.id] ?? []).sorted(by: sortParts)
+                )
+            }
+    }
+
+    private func resetMessageCaches() {
+        sessionMessagesByID = [:]
+        messagePartsByMessageID = [:]
+    }
+
+    private func sortParts(_ lhs: OpenCodePart, _ rhs: OpenCodePart) -> Bool {
+        lhs.id < rhs.id
     }
 
     private func waitForServer(profile: ServerProfile) async throws {
@@ -337,6 +627,15 @@ final class KodantoAppModel {
         var profile = ServerProfile.localDefault
         profile.password = UUID().uuidString
         return profile
+    }
+}
+
+private extension KodantoAppModel.ConnectionState {
+    var isConnected: Bool {
+        if case .connected = self {
+            return true
+        }
+        return false
     }
 }
 

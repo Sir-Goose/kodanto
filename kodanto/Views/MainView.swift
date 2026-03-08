@@ -92,6 +92,10 @@ struct MainView: View {
                     Button("Refresh") {
                         model.refresh()
                     }
+                    if model.isLiveSyncActive {
+                        Label("Live", systemImage: "dot.radiowaves.left.and.right")
+                            .foregroundStyle(.green)
+                    }
                 }
             }
             .padding()

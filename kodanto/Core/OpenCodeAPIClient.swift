@@ -44,6 +44,10 @@ struct OpenCodeAPIClient {
         try await request(path: "/question", directory: directory)
     }
 
+    func globalSSEClient() -> OpenCodeSSEClient {
+        OpenCodeSSEClient(profile: profile)
+    }
+
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] {
         try await request(path: "/session/\(sessionID)/message", directory: directory, queryItems: [
             URLQueryItem(name: "limit", value: "200")

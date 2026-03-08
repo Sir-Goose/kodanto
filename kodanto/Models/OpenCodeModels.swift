@@ -344,6 +344,24 @@ enum OpenCodeMessage: Decodable, Identifiable, Hashable {
             return "OpenCode"
         }
     }
+
+    var sessionID: String {
+        switch self {
+        case .user(let user):
+            return user.sessionID
+        case .assistant(let assistant):
+            return assistant.sessionID
+        }
+    }
+
+    var createdAt: Double {
+        switch self {
+        case .user(let user):
+            return user.time.created
+        case .assistant(let assistant):
+            return assistant.time.created
+        }
+    }
 }
 
 enum OpenCodePart: Decodable, Identifiable, Hashable {
@@ -575,6 +593,224 @@ enum OpenCodePart: Decodable, Identifiable, Hashable {
             return value.description
         case .unknown(let value):
             return value.type
+        }
+    }
+
+    var sessionID: String {
+        switch self {
+        case .text(let value):
+            return value.sessionID
+        case .reasoning(let value):
+            return value.sessionID
+        case .tool(let value):
+            return value.sessionID
+        case .file(let value):
+            return value.sessionID
+        case .patch(let value):
+            return value.sessionID
+        case .agent(let value):
+            return value.sessionID
+        case .snapshot(let value):
+            return value.sessionID
+        case .retry(let value):
+            return value.sessionID
+        case .compaction(let value):
+            return value.sessionID
+        case .stepStart(let value):
+            return value.sessionID
+        case .stepFinish(let value):
+            return value.sessionID
+        case .subtask(let value):
+            return value.sessionID
+        case .unknown(let value):
+            return value.sessionID
+        }
+    }
+
+    var messageID: String {
+        switch self {
+        case .text(let value):
+            return value.messageID
+        case .reasoning(let value):
+            return value.messageID
+        case .tool(let value):
+            return value.messageID
+        case .file(let value):
+            return value.messageID
+        case .patch(let value):
+            return value.messageID
+        case .agent(let value):
+            return value.messageID
+        case .snapshot(let value):
+            return value.messageID
+        case .retry(let value):
+            return value.messageID
+        case .compaction(let value):
+            return value.messageID
+        case .stepStart(let value):
+            return value.messageID
+        case .stepFinish(let value):
+            return value.messageID
+        case .subtask(let value):
+            return value.messageID
+        case .unknown(let value):
+            return value.messageID
+        }
+    }
+
+    func applyingDelta(field: String, delta: String) -> OpenCodePart? {
+        switch self {
+        case .text(let value) where field == "text":
+            return .text(.init(
+                id: value.id,
+                sessionID: value.sessionID,
+                messageID: value.messageID,
+                type: value.type,
+                text: value.text + delta
+            ))
+        case .reasoning(let value) where field == "text":
+            return .reasoning(.init(
+                id: value.id,
+                sessionID: value.sessionID,
+                messageID: value.messageID,
+                type: value.type,
+                text: value.text + delta
+            ))
+        default:
+            return nil
+        }
+    }
+}
+
+struct OpenCodeGlobalEvent: Decodable {
+    let directory: String?
+    let payload: OpenCodeEvent
+}
+
+enum OpenCodeEvent: Decodable {
+    struct SessionInfoPayload: Decodable {
+        let info: OpenCodeSession
+    }
+
+    struct SessionStatusPayload: Decodable {
+        let sessionID: String
+        let status: OpenCodeSessionStatus
+    }
+
+    struct TodoUpdatedPayload: Decodable {
+        let sessionID: String
+        let todos: [OpenCodeTodo]
+    }
+
+    struct MessageUpdatedPayload: Decodable {
+        let info: OpenCodeMessage
+    }
+
+    struct MessageRemovedPayload: Decodable {
+        let sessionID: String
+        let messageID: String
+    }
+
+    struct MessagePartUpdatedPayload: Decodable {
+        let part: OpenCodePart
+    }
+
+    struct MessagePartDeltaPayload: Decodable {
+        let sessionID: String
+        let messageID: String
+        let partID: String
+        let field: String
+        let delta: String
+    }
+
+    struct MessagePartRemovedPayload: Decodable {
+        let sessionID: String
+        let messageID: String
+        let partID: String
+    }
+
+    struct PermissionRepliedPayload: Decodable {
+        let sessionID: String
+        let requestID: String
+        let reply: String
+    }
+
+    struct QuestionResolvedPayload: Decodable {
+        let sessionID: String
+        let requestID: String
+    }
+
+    case serverConnected
+    case serverHeartbeat
+    case globalDisposed
+    case projectUpdated(OpenCodeProject)
+    case sessionCreated(SessionInfoPayload)
+    case sessionUpdated(SessionInfoPayload)
+    case sessionDeleted(SessionInfoPayload)
+    case sessionStatus(SessionStatusPayload)
+    case todoUpdated(TodoUpdatedPayload)
+    case messageUpdated(MessageUpdatedPayload)
+    case messageRemoved(MessageRemovedPayload)
+    case messagePartUpdated(MessagePartUpdatedPayload)
+    case messagePartDelta(MessagePartDeltaPayload)
+    case messagePartRemoved(MessagePartRemovedPayload)
+    case permissionAsked(OpenCodePermissionRequest)
+    case permissionReplied(PermissionRepliedPayload)
+    case questionAsked(OpenCodeQuestionRequest)
+    case questionReplied(QuestionResolvedPayload)
+    case questionRejected(QuestionResolvedPayload)
+    case unknown(String)
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case properties
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+
+        switch type {
+        case "server.connected":
+            self = .serverConnected
+        case "server.heartbeat":
+            self = .serverHeartbeat
+        case "global.disposed":
+            self = .globalDisposed
+        case "project.updated":
+            self = .projectUpdated(try container.decode(OpenCodeProject.self, forKey: .properties))
+        case "session.created":
+            self = .sessionCreated(try container.decode(SessionInfoPayload.self, forKey: .properties))
+        case "session.updated":
+            self = .sessionUpdated(try container.decode(SessionInfoPayload.self, forKey: .properties))
+        case "session.deleted":
+            self = .sessionDeleted(try container.decode(SessionInfoPayload.self, forKey: .properties))
+        case "session.status":
+            self = .sessionStatus(try container.decode(SessionStatusPayload.self, forKey: .properties))
+        case "todo.updated":
+            self = .todoUpdated(try container.decode(TodoUpdatedPayload.self, forKey: .properties))
+        case "message.updated":
+            self = .messageUpdated(try container.decode(MessageUpdatedPayload.self, forKey: .properties))
+        case "message.removed":
+            self = .messageRemoved(try container.decode(MessageRemovedPayload.self, forKey: .properties))
+        case "message.part.updated":
+            self = .messagePartUpdated(try container.decode(MessagePartUpdatedPayload.self, forKey: .properties))
+        case "message.part.delta":
+            self = .messagePartDelta(try container.decode(MessagePartDeltaPayload.self, forKey: .properties))
+        case "message.part.removed":
+            self = .messagePartRemoved(try container.decode(MessagePartRemovedPayload.self, forKey: .properties))
+        case "permission.asked":
+            self = .permissionAsked(try container.decode(OpenCodePermissionRequest.self, forKey: .properties))
+        case "permission.replied":
+            self = .permissionReplied(try container.decode(PermissionRepliedPayload.self, forKey: .properties))
+        case "question.asked":
+            self = .questionAsked(try container.decode(OpenCodeQuestionRequest.self, forKey: .properties))
+        case "question.replied":
+            self = .questionReplied(try container.decode(QuestionResolvedPayload.self, forKey: .properties))
+        case "question.rejected":
+            self = .questionRejected(try container.decode(QuestionResolvedPayload.self, forKey: .properties))
+        default:
+            self = .unknown(type)
         }
     }
 }
