@@ -39,12 +39,12 @@ final class KodantoAppModel {
     var questions: [OpenCodeQuestionRequest] = []
     var pathInfo: OpenCodePathInfo?
     var draftPrompt = ""
-    var newSessionTitle = ""
     var sidecarLog = ""
     var showingConnectionSheet = false
     var showingDiagnostics = false
     var lastSSEError: String?
     var reconnectCount = 0
+    var loadingSessionDirectories: Set<String> = []
 
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
@@ -137,6 +137,7 @@ final class KodantoAppModel {
         reconnectCount = 0
         sessionsByDirectory = [:]
         sessionStatusesByDirectory = [:]
+        loadingSessionDirectories = []
         resetMessageCaches()
     }
 
@@ -205,16 +206,46 @@ final class KodantoAppModel {
         }
     }
 
-    func createSession() {
+    func sessions(for project: OpenCodeProject) -> [OpenCodeSession] {
+        sessionsByDirectory[project.worktree] ?? []
+    }
+
+    func sessionStatus(for session: OpenCodeSession, in project: OpenCodeProject) -> OpenCodeSessionStatus? {
+        sessionStatusesByDirectory[project.worktree]?[session.id]
+    }
+
+    func hasLoadedSessions(for project: OpenCodeProject) -> Bool {
+        sessionsByDirectory[project.worktree] != nil
+    }
+
+    func isLoadingSessions(for project: OpenCodeProject) -> Bool {
+        loadingSessionDirectories.contains(project.worktree)
+    }
+
+    func loadSessionsIfNeeded(for project: OpenCodeProject) {
+        guard sessionsByDirectory[project.worktree] == nil,
+              !loadingSessionDirectories.contains(project.worktree)
+        else { return }
+
         Task {
-            guard let profile = selectedProfile, let project = selectedProject else { return }
+            guard let profile = selectedProfile else { return }
+            do {
+                try await loadSessions(for: project, using: OpenCodeAPIClient(profile: profile))
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func createSession(in projectID: OpenCodeProject.ID) {
+        Task {
+            guard let profile = selectedProfile, let project = project(for: projectID) else { return }
+            selectedProjectID = project.id
+            applySelectedProjectCache()
+
             do {
                 let client = OpenCodeAPIClient(profile: profile)
-                let created = try await client.createSession(
-                    directory: project.worktree,
-                    title: emptyToNil(newSessionTitle)
-                )
-                newSessionTitle = ""
+                let created = try await client.createSession(directory: project.worktree, title: nil)
                 try await loadSessions(for: project, using: client)
                 selectedSessionID = created.id
                 try await loadSessionDetail(using: client)
@@ -243,28 +274,20 @@ final class KodantoAppModel {
         }
     }
 
-    func selectProject(_ projectID: OpenCodeProject.ID) {
-        selectedProjectID = projectID
-        selectedSessionID = nil
-        selectedSessionMessages = []
-        sessionTodos = []
-
+    func selectSession(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
         Task {
-            guard let profile = selectedProfile, let project = selectedProject else { return }
-            do {
-                try await loadSessions(for: project, using: OpenCodeAPIClient(profile: profile))
-            } catch {
-                connectionState = .failed(error.localizedDescription)
-            }
-        }
-    }
+            guard let profile = selectedProfile, let project = project(for: projectID) else { return }
+            selectedProjectID = project.id
+            applySelectedProjectCache()
+            selectedSessionID = sessionID
 
-    func selectSession(_ sessionID: OpenCodeSession.ID) {
-        selectedSessionID = sessionID
-        Task {
-            guard let profile = selectedProfile else { return }
             do {
-                try await loadSessionDetail(using: OpenCodeAPIClient(profile: profile))
+                let client = OpenCodeAPIClient(profile: profile)
+                if sessionsByDirectory[project.worktree] == nil {
+                    try await loadSessions(for: project, using: client)
+                } else {
+                    try await loadSessionDetail(using: client)
+                }
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -324,14 +347,31 @@ final class KodantoAppModel {
             selectedProjectID = loadedProjects.first?.id
         }
 
-        if let project = selectedProject {
-            try await loadSessions(for: project, using: client)
-        } else {
+        let projectsToRefresh = loadedProjects.filter { project in
+            project.id == selectedProjectID || sessionsByDirectory[project.worktree] != nil
+        }
+
+        if projectsToRefresh.isEmpty {
+            sessions = []
+            sessionStatuses = [:]
+            selectedSessionID = nil
+            selectedSessionMessages = []
+            sessionTodos = []
+            permissions = []
+            questions = []
             resetMessageCaches()
+        } else {
+            applySelectedProjectCache()
+            for project in projectsToRefresh {
+                try await loadSessions(for: project, using: client)
+            }
         }
     }
 
     private func loadSessions(for project: OpenCodeProject, using client: OpenCodeAPIClient) async throws {
+        loadingSessionDirectories.insert(project.worktree)
+        defer { loadingSessionDirectories.remove(project.worktree) }
+
         async let sessionsTask = client.sessions(directory: project.worktree)
         async let statusesTask = client.sessionStatuses(directory: project.worktree)
 
@@ -340,8 +380,10 @@ final class KodantoAppModel {
 
         sessionsByDirectory[project.worktree] = loadedSessions
         sessionStatusesByDirectory[project.worktree] = loadedStatuses
-        sessions = loadedSessions
-        sessionStatuses = loadedStatuses
+
+        guard selectedProjectID == project.id else { return }
+
+        applySelectedProjectCache()
 
         if selectedSessionID == nil || !loadedSessions.contains(where: { $0.id == selectedSessionID }) {
             selectedSessionID = loadedSessions.first?.id
@@ -533,15 +575,10 @@ final class KodantoAppModel {
         sessionsByDirectory[directory] = cached
 
         if directoryMatchesSelection(directory) {
-            sessions = cached
-        }
-
-        if selectedSessionID == nil {
-            selectedSessionID = session.id
-        }
-
-        if directoryMatchesSelection(directory), sessions.contains(where: { $0.id == session.id }) == false, selectedSessionID == nil {
-            selectedSessionID = session.id
+            applySelectedProjectCache()
+            if selectedSessionID == nil {
+                selectedSessionID = session.id
+            }
         }
     }
 
@@ -555,8 +592,7 @@ final class KodantoAppModel {
         sessionStatusesByDirectory[directory] = cachedStatuses
 
         if directoryMatchesSelection(directory) {
-            sessions = cached
-            sessionStatuses = cachedStatuses
+            applySelectedProjectCache()
         }
 
         if selectedSessionID == session.id {
@@ -577,7 +613,7 @@ final class KodantoAppModel {
         sessionStatusesByDirectory[directory] = cachedStatuses
 
         if directoryMatchesSelection(directory) {
-            sessionStatuses = cachedStatuses
+            applySelectedProjectCache()
         }
     }
 
@@ -687,6 +723,21 @@ final class KodantoAppModel {
         messagePartsByMessageID = [:]
     }
 
+    private func project(for projectID: OpenCodeProject.ID) -> OpenCodeProject? {
+        projects.first(where: { $0.id == projectID })
+    }
+
+    private func applySelectedProjectCache() {
+        guard let selectedProject else {
+            sessions = []
+            sessionStatuses = [:]
+            return
+        }
+
+        sessions = sessionsByDirectory[selectedProject.worktree] ?? []
+        sessionStatuses = sessionStatusesByDirectory[selectedProject.worktree] ?? [:]
+    }
+
     private func directoryMatchesSelection(_ directory: String) -> Bool {
         guard let selectedProject else { return false }
         return directory == selectedProject.worktree || directory == selectedProject.id
@@ -705,11 +756,6 @@ final class KodantoAppModel {
             try await Task.sleep(for: .milliseconds(150))
         }
         throw OpenCodeAPIError.serverError(statusCode: 0, message: "Timed out waiting for local opencode sidecar.")
-    }
-
-    private func emptyToNil(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
     }
 
     static func makeLocalProfile() -> ServerProfile {
