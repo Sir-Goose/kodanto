@@ -51,11 +51,18 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
+        scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.documentView = textView
 
         context.coordinator.scrollView = scrollView
         context.coordinator.textView = textView
         textView.coordinator = context.coordinator
+        NotificationCenter.default.addObserver(
+            context.coordinator,
+            selector: #selector(Coordinator.clipViewBoundsDidChange(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
         DispatchQueue.main.async {
             context.coordinator.recalculateHeight()
         }
@@ -90,6 +97,10 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             self.parent = parent
         }
 
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
             let updatedText = textView.string
@@ -107,6 +118,11 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             if parent.text != updatedText {
                 parent.text = updatedText
             }
+        }
+
+        @objc
+        func clipViewBoundsDidChange(_ notification: Notification) {
+            pinTextViewportToTop()
         }
 
         func recalculateHeight() {
@@ -136,6 +152,18 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             let shouldScroll = contentHeight > visibleHeight + 0.5
             if scrollView.hasVerticalScroller != shouldScroll {
                 scrollView.hasVerticalScroller = shouldScroll
+            }
+
+            pinTextViewportToTop()
+        }
+
+        private func pinTextViewportToTop() {
+            guard let scrollView else { return }
+
+            let targetOrigin = NSPoint(x: 0, y: 0)
+            if scrollView.contentView.bounds.origin != targetOrigin {
+                scrollView.contentView.scroll(to: targetOrigin)
+                scrollView.reflectScrolledClipView(scrollView.contentView)
             }
         }
     }

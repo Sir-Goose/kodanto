@@ -11,6 +11,8 @@ struct MainView: View {
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
     private static let composerNSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    private static let messageColumnMaxWidth: CGFloat = 760
+    private static let composerMaxWidth: CGFloat = 900
 
     private var promptLineHeight: CGFloat {
         Self.composerNSFont.ascender - Self.composerNSFont.descender + Self.composerNSFont.leading
@@ -18,6 +20,10 @@ struct MainView: View {
 
     private var promptMinimumHeight: CGFloat {
         ceil(promptLineHeight + (Self.composerVerticalPadding * 2))
+    }
+
+    private var composerScrollClearance: CGFloat {
+        composerOverlayHeight + 56
     }
 
     var body: some View {
@@ -277,12 +283,17 @@ struct MainView: View {
                                 }
                             }
                             .padding()
-                            .padding(.bottom, composerOverlayHeight + 12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                        .safeAreaInset(edge: .bottom) {
+                            Color.clear
+                                .frame(height: composerScrollClearance)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                         composer(maxHeight: composerMaxHeight)
+                            .frame(maxWidth: Self.composerMaxWidth)
                             .padding(.horizontal, 16)
                             .padding(.bottom, 16)
                             .background {
@@ -308,7 +319,7 @@ struct MainView: View {
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
 
-        return HStack(alignment: .bottom, spacing: 12) {
+        return HStack(alignment: .top, spacing: 12) {
             ZStack(alignment: .topLeading) {
                 AutoSizingPromptEditor(
                     text: $model.draftPrompt,
