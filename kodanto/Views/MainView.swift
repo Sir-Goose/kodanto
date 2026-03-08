@@ -12,6 +12,9 @@ struct MainView: View {
         } detail: {
             detailPanel
         }
+        .sheet(isPresented: $model.showingDiagnostics) {
+            DiagnosticsSheet(model: model)
+        }
         .sheet(isPresented: $model.showingConnectionSheet) {
             ConnectionSheet(existingProfile: editingProfile) { profile in
                 model.saveProfile(profile)
@@ -290,6 +293,53 @@ struct MainView: View {
             }
         }
         .font(.caption)
+    }
+}
+
+private struct DiagnosticsSheet: View {
+    @Bindable var model: KodantoAppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let diagnostics = model.diagnostics
+
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                Text("Diagnostics")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+            }
+
+            Form {
+                LabeledContent("Server URL", value: diagnostics.serverURL)
+                LabeledContent("Binary", value: diagnostics.binaryPath)
+                LabeledContent("Live Sync", value: diagnostics.liveSyncState)
+                LabeledContent("Reconnects", value: "\(diagnostics.reconnectCount)")
+                LabeledContent("Last Event", value: diagnostics.lastEventDescription)
+                LabeledContent("Cached Projects", value: "\(diagnostics.cachedProjects)")
+                LabeledContent("Cached Sessions", value: "\(diagnostics.cachedSessions)")
+                LabeledContent("Selected Directory", value: diagnostics.selectedProjectDirectory ?? "None")
+                LabeledContent("Last Error", value: diagnostics.lastError ?? "None")
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Sidecar Log")
+                        .font(.headline)
+                    ScrollView {
+                        Text(diagnostics.sidecarLog.isEmpty ? "No sidecar output yet." : diagnostics.sidecarLog)
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(minHeight: 220)
+                }
+            }
+            .formStyle(.grouped)
+        }
+        .padding()
+        .frame(width: 680, height: 620)
     }
 }
 

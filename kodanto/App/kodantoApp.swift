@@ -14,6 +14,14 @@ struct kodantoApp: App {
                 .frame(minWidth: 1180, minHeight: 760)
         }
         .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandMenu("View") {
+                Button("Diagnostics") {
+                    model.showingDiagnostics = true
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+            }
+        }
 
         Settings {
             Form {

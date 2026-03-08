@@ -5,6 +5,19 @@ import Observation
 @MainActor
 @Observable
 final class KodantoAppModel {
+    struct DiagnosticsSnapshot {
+        let serverURL: String
+        let binaryPath: String
+        let liveSyncState: String
+        let reconnectCount: Int
+        let lastEventDescription: String
+        let lastError: String?
+        let selectedProjectDirectory: String?
+        let cachedProjects: Int
+        let cachedSessions: Int
+        let sidecarLog: String
+    }
+
     enum ConnectionState: Equatable {
         case idle
         case connecting
@@ -29,6 +42,9 @@ final class KodantoAppModel {
     var newSessionTitle = ""
     var sidecarLog = ""
     var showingConnectionSheet = false
+    var showingDiagnostics = false
+    var lastSSEError: String?
+    var reconnectCount = 0
 
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
@@ -38,6 +54,8 @@ final class KodantoAppModel {
     private var didBootstrapLiveSync = false
     private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
     private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
+    private var sessionsByDirectory: [String: [OpenCodeSession]] = [:]
+    private var sessionStatusesByDirectory: [String: [String: OpenCodeSessionStatus]] = [:]
 
     private let heartbeatTimeout: Duration = .seconds(15)
     private let reconnectDelay: Duration = .milliseconds(250)
@@ -86,6 +104,21 @@ final class KodantoAppModel {
         globalEventTask != nil
     }
 
+    var diagnostics: DiagnosticsSnapshot {
+        DiagnosticsSnapshot(
+            serverURL: selectedProfile?.normalizedBaseURL ?? "Not configured",
+            binaryPath: (try? SidecarProcess.executablePath()) ?? "Not found",
+            liveSyncState: isLiveSyncActive ? "Connected" : "Inactive",
+            reconnectCount: reconnectCount,
+            lastEventDescription: lastEventAt == .distantPast ? "No events yet" : RelativeDateTimeFormatter().localizedString(for: lastEventAt, relativeTo: .now),
+            lastError: lastSSEError,
+            selectedProjectDirectory: selectedProject?.worktree,
+            cachedProjects: sessionsByDirectory.keys.count,
+            cachedSessions: sessionsByDirectory.values.reduce(0) { $0 + $1.count },
+            sidecarLog: sidecarLog
+        )
+    }
+
     func selectProfile(_ profileID: ServerProfile.ID) {
         stopLiveSync()
         selectedProfileID = profileID
@@ -100,6 +133,10 @@ final class KodantoAppModel {
         questions = []
         pathInfo = nil
         didBootstrapLiveSync = false
+        lastSSEError = nil
+        reconnectCount = 0
+        sessionsByDirectory = [:]
+        sessionStatusesByDirectory = [:]
         resetMessageCaches()
     }
 
@@ -299,8 +336,12 @@ final class KodantoAppModel {
         async let statusesTask = client.sessionStatuses(directory: project.worktree)
 
         let loadedSessions = try await sessionsTask.sorted { $0.time.updated > $1.time.updated }
+        let loadedStatuses = try await statusesTask
+
+        sessionsByDirectory[project.worktree] = loadedSessions
+        sessionStatusesByDirectory[project.worktree] = loadedStatuses
         sessions = loadedSessions
-        sessionStatuses = try await statusesTask
+        sessionStatuses = loadedStatuses
 
         if selectedSessionID == nil || !loadedSessions.contains(where: { $0.id == selectedSessionID }) {
             selectedSessionID = loadedSessions.first?.id
@@ -343,6 +384,7 @@ final class KodantoAppModel {
         heartbeatWatchdogTask?.cancel()
         didBootstrapLiveSync = false
         lastEventAt = .now
+        lastSSEError = nil
 
         globalEventTask = Task { [weak self] in
             guard let self else { return }
@@ -367,11 +409,13 @@ final class KodantoAppModel {
                     return
                 } catch {
                     if Task.isCancelled { return }
+                    lastSSEError = error.localizedDescription
                     connectionState = .failed(error.localizedDescription)
                 }
 
                 stopHeartbeatWatchdog()
                 if Task.isCancelled { return }
+                reconnectCount += 1
                 try? await Task.sleep(for: reconnectDelay)
             }
         }
@@ -391,7 +435,8 @@ final class KodantoAppModel {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { return }
                 guard connectionState.isConnected else { continue }
-                guard lastEventAt.addingTimeInterval(15) < .now else { continue }
+                guard lastEventAt.timeIntervalSinceNow < -15 else { continue }
+                lastSSEError = "Heartbeat timed out"
                 connectionState = .failed("Live sync disconnected. Reconnecting...")
                 globalEventTask?.cancel()
                 startLiveSync(for: profile)
@@ -418,41 +463,49 @@ final class KodantoAppModel {
         case .projectUpdated(let project):
             upsertProject(project)
         default:
-            guard let selectedProject, directory == selectedProject.worktree || directory == selectedProject.id else { return }
-            applyDirectoryEvent(event.payload)
+            applyDirectoryEvent(event.payload, directory: directory)
         }
     }
 
-    private func applyDirectoryEvent(_ event: OpenCodeEvent) {
+    private func applyDirectoryEvent(_ event: OpenCodeEvent, directory: String) {
         switch event {
         case .sessionCreated(let payload):
-            upsertSession(payload.info)
+            upsertSession(payload.info, directory: directory)
         case .sessionUpdated(let payload):
-            upsertSession(payload.info)
+            upsertSession(payload.info, directory: directory)
         case .sessionDeleted(let payload):
-            removeSession(payload.info)
+            removeSession(payload.info, directory: directory)
         case .sessionStatus(let payload):
-            sessionStatuses[payload.sessionID] = payload.status
+            upsertSessionStatus(payload.status, sessionID: payload.sessionID, directory: directory)
         case .todoUpdated(let payload):
-            guard payload.sessionID == selectedSessionID else { return }
+            guard directoryMatchesSelection(directory), payload.sessionID == selectedSessionID else { return }
             sessionTodos = payload.todos
         case .messageUpdated(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             upsertMessage(payload.info)
         case .messageRemoved(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             removeMessage(sessionID: payload.sessionID, messageID: payload.messageID)
         case .messagePartUpdated(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             upsertPart(payload.part)
         case .messagePartDelta(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             applyPartDelta(payload)
         case .messagePartRemoved(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             removePart(messageID: payload.messageID, partID: payload.partID)
         case .permissionAsked(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             upsertPermission(payload)
         case .permissionReplied(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             removePermission(sessionID: payload.sessionID, requestID: payload.requestID)
         case .questionAsked(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             upsertQuestion(payload)
         case .questionReplied(let payload), .questionRejected(let payload):
+            guard directoryMatchesSelection(directory) else { return }
             removeQuestion(sessionID: payload.sessionID, requestID: payload.requestID)
         default:
             break
@@ -468,23 +521,44 @@ final class KodantoAppModel {
         }
     }
 
-    private func upsertSession(_ session: OpenCodeSession) {
-        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
-            sessions[index] = session
+    private func upsertSession(_ session: OpenCodeSession, directory: String) {
+        var cached = sessionsByDirectory[directory] ?? []
+        if let index = cached.firstIndex(where: { $0.id == session.id }) {
+            cached[index] = session
         } else {
-            sessions.append(session)
+            cached.append(session)
         }
 
-        sessions.sort { $0.time.updated > $1.time.updated }
+        cached.sort { $0.time.updated > $1.time.updated }
+        sessionsByDirectory[directory] = cached
+
+        if directoryMatchesSelection(directory) {
+            sessions = cached
+        }
 
         if selectedSessionID == nil {
             selectedSessionID = session.id
         }
+
+        if directoryMatchesSelection(directory), sessions.contains(where: { $0.id == session.id }) == false, selectedSessionID == nil {
+            selectedSessionID = session.id
+        }
     }
 
-    private func removeSession(_ session: OpenCodeSession) {
-        sessions.removeAll { $0.id == session.id }
-        sessionStatuses.removeValue(forKey: session.id)
+    private func removeSession(_ session: OpenCodeSession, directory: String) {
+        var cached = sessionsByDirectory[directory] ?? []
+        cached.removeAll { $0.id == session.id }
+        sessionsByDirectory[directory] = cached
+
+        var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
+        cachedStatuses.removeValue(forKey: session.id)
+        sessionStatusesByDirectory[directory] = cachedStatuses
+
+        if directoryMatchesSelection(directory) {
+            sessions = cached
+            sessionStatuses = cachedStatuses
+        }
+
         if selectedSessionID == session.id {
             selectedSessionID = sessions.first?.id
             if selectedSessionID == nil {
@@ -494,6 +568,16 @@ final class KodantoAppModel {
             } else {
                 rebuildSelectedSessionMessages()
             }
+        }
+    }
+
+    private func upsertSessionStatus(_ status: OpenCodeSessionStatus, sessionID: String, directory: String) {
+        var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
+        cachedStatuses[sessionID] = status
+        sessionStatusesByDirectory[directory] = cachedStatuses
+
+        if directoryMatchesSelection(directory) {
+            sessionStatuses = cachedStatuses
         }
     }
 
@@ -601,6 +685,11 @@ final class KodantoAppModel {
     private func resetMessageCaches() {
         sessionMessagesByID = [:]
         messagePartsByMessageID = [:]
+    }
+
+    private func directoryMatchesSelection(_ directory: String) -> Bool {
+        guard let selectedProject else { return false }
+        return directory == selectedProject.worktree || directory == selectedProject.id
     }
 
     private func sortParts(_ lhs: OpenCodePart, _ rhs: OpenCodePart) -> Bool {
