@@ -12,7 +12,7 @@ struct MainView: View {
     private static let composerVerticalPadding: CGFloat = 6
     private static let composerNSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     private static let messageColumnMaxWidth: CGFloat = 760
-    private static let composerMaxWidth: CGFloat = 900
+    private static let composerMaxWidth: CGFloat = 800
 
     private var promptLineHeight: CGFloat {
         Self.composerNSFont.ascender - Self.composerNSFont.descender + Self.composerNSFont.leading
