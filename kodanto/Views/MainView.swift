@@ -1,9 +1,24 @@
+import AppKit
 import SwiftUI
 
 struct MainView: View {
     @Bindable var model: KodantoAppModel
     @State private var editingProfile: ServerProfile?
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
+    @State private var promptEditorHeight: CGFloat = 0
+    @State private var composerOverlayHeight: CGFloat = 0
+
+    private static let composerHorizontalPadding: CGFloat = 8
+    private static let composerVerticalPadding: CGFloat = 6
+    private static let composerNSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+
+    private var promptLineHeight: CGFloat {
+        Self.composerNSFont.ascender - Self.composerNSFont.descender + Self.composerNSFont.leading
+    }
+
+    private var promptMinimumHeight: CGFloat {
+        ceil(promptLineHeight + (Self.composerVerticalPadding * 2))
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -188,105 +203,157 @@ struct MainView: View {
     }
 
     private var detailPanel: some View {
-        VStack(spacing: 0) {
-            if let session = model.selectedSession {
-                header(for: session)
-                Divider()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        ForEach(model.selectedSessionMessages) { envelope in
-                            MessageCard(envelope: envelope)
-                        }
+        GeometryReader { geometry in
+            let composerMaxHeight = max(promptMinimumHeight, geometry.size.height * 0.3)
 
-                        if !model.sessionTodos.isEmpty {
-                            InspectorSection(title: "Todos") {
-                                ForEach(Array(model.sessionTodos.enumerated()), id: \.offset) { _, todo in
-                                    HStack {
-                                        Text(todo.content)
-                                        Spacer()
-                                        Text(todo.status)
-                                            .foregroundStyle(.secondary)
-                                    }
+            VStack(spacing: 0) {
+                if let session = model.selectedSession {
+                    header(for: session)
+                    Divider()
+                    ZStack(alignment: .bottom) {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                ForEach(model.selectedSessionMessages) { envelope in
+                                    MessageCard(envelope: envelope)
                                 }
-                            }
-                        }
 
-                        if !model.permissions.isEmpty {
-                            InspectorSection(title: "Permissions") {
-                                ForEach(model.permissions) { request in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(request.permission)
-                                            .font(.headline)
-                                        Text(request.patterns.joined(separator: ", "))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        HStack {
-                                            Button("Allow Once") {
-                                                model.respondToPermission(request, reply: "once")
-                                            }
-                                            Button("Always") {
-                                                model.respondToPermission(request, reply: "always")
-                                            }
-                                            Button("Reject", role: .destructive) {
-                                                model.respondToPermission(request, reply: "reject")
+                                if !model.sessionTodos.isEmpty {
+                                    InspectorSection(title: "Todos") {
+                                        ForEach(Array(model.sessionTodos.enumerated()), id: \.offset) { _, todo in
+                                            HStack {
+                                                Text(todo.content)
+                                                Spacer()
+                                                Text(todo.status)
+                                                    .foregroundStyle(.secondary)
                                             }
                                         }
                                     }
                                 }
-                            }
-                        }
 
-                        if !model.questions.isEmpty {
-                            InspectorSection(title: "Questions") {
-                                ForEach(model.questions) { request in
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        Text(request.questions.first?.question ?? "Question")
-                                            .font(.headline)
-                                        if let options = request.questions.first?.options, !options.isEmpty {
-                                            ForEach(options) { option in
-                                                Button(option.label) {
-                                                    model.answerQuestion(request, answers: [[option.label]])
+                                if !model.permissions.isEmpty {
+                                    InspectorSection(title: "Permissions") {
+                                        ForEach(model.permissions) { request in
+                                            VStack(alignment: .leading, spacing: 8) {
+                                                Text(request.permission)
+                                                    .font(.headline)
+                                                Text(request.patterns.joined(separator: ", "))
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                                HStack {
+                                                    Button("Allow Once") {
+                                                        model.respondToPermission(request, reply: "once")
+                                                    }
+                                                    Button("Always") {
+                                                        model.respondToPermission(request, reply: "always")
+                                                    }
+                                                    Button("Reject", role: .destructive) {
+                                                        model.respondToPermission(request, reply: "reject")
+                                                    }
                                                 }
                                             }
                                         }
-                                        Button("Reject", role: .destructive) {
-                                            model.rejectQuestion(request)
+                                    }
+                                }
+
+                                if !model.questions.isEmpty {
+                                    InspectorSection(title: "Questions") {
+                                        ForEach(model.questions) { request in
+                                            VStack(alignment: .leading, spacing: 10) {
+                                                Text(request.questions.first?.question ?? "Question")
+                                                    .font(.headline)
+                                                if let options = request.questions.first?.options, !options.isEmpty {
+                                                    ForEach(options) { option in
+                                                        Button(option.label) {
+                                                            model.answerQuestion(request, answers: [[option.label]])
+                                                        }
+                                                    }
+                                                }
+                                                Button("Reject", role: .destructive) {
+                                                    model.rejectQuestion(request)
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
+                            .padding()
+                            .padding(.bottom, composerOverlayHeight + 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                    }
-                    .padding()
-                }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                Divider()
-                composer
-            } else {
-                ContentUnavailableView("Select a session", systemImage: "bubble.left.and.text.bubble.right")
+                        composer(maxHeight: composerMaxHeight)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 16)
+                            .background {
+                                GeometryReader { proxy in
+                                    Color.clear
+                                        .preference(key: ComposerOverlayHeightPreferenceKey.self, value: proxy.size.height)
+                                }
+                            }
+                            .zIndex(1)
+                    }
+                    .onPreferenceChange(ComposerOverlayHeightPreferenceKey.self) { height in
+                        composerOverlayHeight = height
+                    }
+                } else {
+                    ContentUnavailableView("Select a session", systemImage: "bubble.left.and.text.bubble.right")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Prompt")
-                .font(.headline)
-            TextEditor(text: $model.draftPrompt)
-                .font(.body.monospaced())
-                .frame(minHeight: 120)
-                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.25)))
-            HStack {
-                Spacer()
-                Button("Send") {
+    private func composer(maxHeight: CGFloat) -> some View {
+        let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
+
+        return HStack(alignment: .bottom, spacing: 12) {
+            ZStack(alignment: .topLeading) {
+                AutoSizingPromptEditor(
+                    text: $model.draftPrompt,
+                    measuredHeight: $promptEditorHeight,
+                    font: Self.composerNSFont,
+                    textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding)
+                ) {
+                    guard model.canSendPrompt else { return }
                     model.sendPrompt()
                 }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(!model.canSendPrompt)
+                .frame(height: resolvedPromptHeight)
+
+                if model.draftPrompt.isEmpty {
+                    Text("Write a prompt...")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, Self.composerHorizontalPadding)
+                        .padding(.vertical, Self.composerVerticalPadding)
+                        .allowsHitTesting(false)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: resolvedPromptHeight, alignment: .topLeading)
+
+            Button {
+                model.sendPrompt()
+            } label: {
+                Image(systemName: "paperplane.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.return, modifiers: [.command])
+            .disabled(!model.canSendPrompt)
+            .help("Send")
         }
-        .padding()
-        .background(.regularMaterial)
+        .padding(14)
+        .animation(.easeInOut(duration: 0.16), value: resolvedPromptHeight)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.18))
+        )
+        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
     }
 
     private func header(for session: OpenCodeSession) -> some View {
@@ -326,6 +393,14 @@ struct MainView: View {
             }
         }
         .font(.caption)
+    }
+}
+
+private struct ComposerOverlayHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
