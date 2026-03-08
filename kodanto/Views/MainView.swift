@@ -23,7 +23,7 @@ struct MainView: View {
     }
 
     private var composerScrollClearance: CGFloat {
-        composerOverlayHeight + 56
+        composerOverlayHeight + 88
     }
 
     var body: some View {
@@ -281,14 +281,13 @@ struct MainView: View {
                                         }
                                     }
                                 }
+
+                                Color.clear
+                                    .frame(height: composerScrollClearance)
                             }
                             .padding()
                             .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                             .frame(maxWidth: .infinity, alignment: .center)
-                        }
-                        .safeAreaInset(edge: .bottom) {
-                            Color.clear
-                                .frame(height: composerScrollClearance)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
