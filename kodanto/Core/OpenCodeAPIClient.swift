@@ -16,6 +16,14 @@ struct OpenCodeAPIClient {
         try await request(path: "/path", directory: directory)
     }
 
+    func config(directory: String?) async throws -> OpenCodeConfig {
+        try await request(path: "/config", directory: directory)
+    }
+
+    func configProviders(directory: String?) async throws -> OpenCodeConfigProviders {
+        try await request(path: "/config/providers", directory: directory)
+    }
+
     func projects() async throws -> [OpenCodeProject] {
         try await request(path: "/project")
     }
@@ -67,12 +75,12 @@ struct OpenCodeAPIClient {
         )
     }
 
-    func sendPrompt(sessionID: String, directory: String, text: String) async throws {
+    func sendPrompt(sessionID: String, directory: String, text: String, model: PromptRequestBody.ModelSelection?) async throws {
         try await requestNoContent(
             path: "/session/\(sessionID)/prompt_async",
             method: "POST",
             directory: directory,
-            body: AnyEncodable(PromptRequestBody(parts: [.init(type: "text", text: text)]))
+            body: AnyEncodable(PromptRequestBody(model: model, parts: [.init(type: "text", text: text)]))
         )
     }
 

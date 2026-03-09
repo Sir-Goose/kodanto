@@ -64,6 +64,43 @@ struct OpenCodePathInfo: Decodable {
     let directory: String
 }
 
+struct OpenCodeConfig: Decodable {
+    let model: String?
+}
+
+struct OpenCodeConfigProviders: Decodable {
+    let providers: [Provider]
+    let `default`: [String: String]
+
+    struct Provider: Decodable {
+        let id: String
+        let name: String
+        let models: [String: Model]
+    }
+
+    struct Model: Decodable {
+        let id: String?
+        let name: String?
+    }
+}
+
+struct OpenCodeModelOption: Identifiable, Hashable {
+    let providerID: String
+    let providerName: String
+    let modelID: String
+    let modelName: String
+
+    var id: String { "\(providerID)/\(modelID)" }
+}
+
+struct OpenCodeModelProviderGroup: Identifiable, Hashable {
+    let providerID: String
+    let providerName: String
+    let models: [OpenCodeModelOption]
+
+    var id: String { providerID }
+}
+
 struct OpenCodeProject: Decodable, Identifiable, Hashable {
     struct ProjectIcon: Decodable, Hashable {
         let url: String?
@@ -862,11 +899,17 @@ enum JSONValue: Codable, Hashable {
 }
 
 struct PromptRequestBody: Encodable {
+    struct ModelSelection: Encodable {
+        let providerID: String
+        let modelID: String
+    }
+
     struct Part: Encodable {
         let type: String
         let text: String
     }
 
+    let model: ModelSelection?
     let parts: [Part]
 }
 

@@ -37,6 +37,10 @@ final class KodantoAppModel {
     var sessionTodos: [OpenCodeTodo] = []
     var permissions: [OpenCodePermissionRequest] = []
     var questions: [OpenCodeQuestionRequest] = []
+    var availableModelGroups: [OpenCodeModelProviderGroup] = []
+    var selectedModelID: String?
+    var isLoadingModels = false
+    var modelLoadError: String?
     var pathInfo: OpenCodePathInfo?
     var draftPrompt = ""
     var sidecarLog = ""
@@ -47,6 +51,7 @@ final class KodantoAppModel {
 
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
+    private let modelSelectionStore = ModelSelectionStore()
     private var globalEventTask: Task<Void, Never>?
     private var heartbeatWatchdogTask: Task<Void, Never>?
     private var liveSync = LiveSyncTracker()
@@ -67,6 +72,7 @@ final class KodantoAppModel {
         } else {
             selectedProfileID = profiles.first?.id
         }
+        selectedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
 
         sidecar.setOutputHandler { [weak self] line in
             guard let self else { return }
@@ -87,6 +93,12 @@ final class KodantoAppModel {
 
     var selectedSession: OpenCodeSession? {
         sessions.first(where: { $0.id == selectedSessionID })
+    }
+
+    var selectedModel: OpenCodeModelOption? {
+        availableModelGroups
+            .flatMap(\.models)
+            .first(where: { $0.id == selectedModelID })
     }
 
     var canCreateSession: Bool {
@@ -127,6 +139,7 @@ final class KodantoAppModel {
     func selectProfile(_ profileID: ServerProfile.ID) {
         stopLiveSync()
         selectedProfileID = profileID
+        selectedModelID = modelSelectionStore.load(for: profileID)
         connectionState = .idle
         projects = []
         selectedProjectID = nil
@@ -136,6 +149,9 @@ final class KodantoAppModel {
         sessionTodos = []
         permissions = []
         questions = []
+        availableModelGroups = []
+        isLoadingModels = false
+        modelLoadError = nil
         pathInfo = nil
         lastSSEError = nil
         liveSync = LiveSyncTracker()
@@ -158,15 +174,24 @@ final class KodantoAppModel {
         }
         storage.save(profiles)
         selectedProfileID = profile.id
+        selectedModelID = modelSelectionStore.load(for: profile.id)
     }
 
     func deleteProfile(_ profile: ServerProfile) {
         guard profiles.count > 1 else { return }
         profiles.removeAll { $0.id == profile.id }
+        modelSelectionStore.remove(for: profile.id)
         if selectedProfileID == profile.id {
             selectedProfileID = profiles.first?.id
+            selectedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
         }
         storage.save(profiles)
+    }
+
+    func selectModel(_ modelID: String) {
+        selectedModelID = modelID
+        guard let profileID = selectedProfileID else { return }
+        modelSelectionStore.save(modelID, for: profileID)
     }
 
     func connect() {
@@ -268,7 +293,14 @@ final class KodantoAppModel {
 
             do {
                 let client = OpenCodeAPIClient(profile: profile)
-                try await client.sendPrompt(sessionID: session.id, directory: project.worktree, text: text)
+                try await client.sendPrompt(
+                    sessionID: session.id,
+                    directory: project.worktree,
+                    text: text,
+                    model: selectedModel.map {
+                        PromptRequestBody.ModelSelection(providerID: $0.providerID, modelID: $0.modelID)
+                    }
+                )
                 try await loadSessionDetail(using: client)
                 try await loadSessions(for: project, using: client)
             } catch {
@@ -346,6 +378,14 @@ final class KodantoAppModel {
 
         pathInfo = resolvedPathInfo
         projects = loadedProjects
+
+        do {
+            try await loadAvailableModels(using: client)
+        } catch {
+            availableModelGroups = []
+            isLoadingModels = false
+            modelLoadError = error.localizedDescription
+        }
 
         if selectedProjectID == nil || !loadedProjects.contains(where: { $0.id == selectedProjectID }) {
             selectedProjectID = loadedProjects.first?.id
@@ -772,6 +812,95 @@ final class KodantoAppModel {
         profile.password = UUID().uuidString
         return profile
     }
+
+    private func loadAvailableModels(using client: OpenCodeAPIClient) async throws {
+        isLoadingModels = true
+        modelLoadError = nil
+        defer { isLoadingModels = false }
+
+        async let configTask = client.config(directory: nil)
+        async let providersTask = client.configProviders(directory: nil)
+
+        let config = try await configTask
+        let providersResponse = try await providersTask
+        applyAvailableModels(config: config, providersResponse: providersResponse)
+    }
+
+    private func applyAvailableModels(config: OpenCodeConfig, providersResponse: OpenCodeConfigProviders) {
+        let groups = providersResponse.providers
+            .map { provider in
+                OpenCodeModelProviderGroup(
+                    providerID: provider.id,
+                    providerName: provider.name,
+                    models: provider.models.map { key, model in
+                        let resolvedModelID = (model.id ?? key).trimmingCharacters(in: .whitespacesAndNewlines)
+                        return OpenCodeModelOption(
+                            providerID: provider.id,
+                            providerName: provider.name,
+                            modelID: resolvedModelID,
+                            modelName: (model.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? resolvedModelID
+                        )
+                    }
+                    .sorted {
+                        if $0.modelName.localizedCaseInsensitiveCompare($1.modelName) == .orderedSame {
+                            return $0.modelID.localizedCaseInsensitiveCompare($1.modelID) == .orderedAscending
+                        }
+                        return $0.modelName.localizedCaseInsensitiveCompare($1.modelName) == .orderedAscending
+                    }
+                )
+            }
+            .sorted {
+                $0.providerName.localizedCaseInsensitiveCompare($1.providerName) == .orderedAscending
+            }
+
+        availableModelGroups = groups.filter { !$0.models.isEmpty }
+
+        let availableIDs = Set(availableModelGroups.flatMap(\.models).map(\.id))
+        let storedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
+        let configuredModelID = normalizedModelIdentifier(config.model)
+        let providerDefaultModelID = resolvedProviderDefaultModelID(from: providersResponse.default, groups: availableModelGroups)
+
+        let resolvedSelection = [selectedModelID, storedModelID, configuredModelID, providerDefaultModelID, availableModelGroups.first?.models.first?.id]
+            .compactMap { $0 }
+            .first(where: { availableIDs.contains($0) })
+
+        selectedModelID = resolvedSelection
+
+        guard let profileID = selectedProfileID else { return }
+        if let resolvedSelection {
+            modelSelectionStore.save(resolvedSelection, for: profileID)
+        } else {
+            modelSelectionStore.remove(for: profileID)
+        }
+    }
+
+    private func normalizedModelIdentifier(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private func resolvedProviderDefaultModelID(
+        from defaults: [String: String],
+        groups: [OpenCodeModelProviderGroup]
+    ) -> String? {
+        for group in groups {
+            guard let candidate = defaults[group.providerID]?.trimmingCharacters(in: .whitespacesAndNewlines), !candidate.isEmpty else {
+                continue
+            }
+
+            if candidate.contains("/"), group.models.contains(where: { $0.id == candidate }) {
+                return candidate
+            }
+
+            if let match = group.models.first(where: { $0.modelID == candidate }) {
+                return match.id
+            }
+        }
+
+        return nil
+    }
 }
 
 private extension KodantoAppModel.ConnectionState {
@@ -794,5 +923,29 @@ private struct ServerProfileStore {
     func save(_ profiles: [ServerProfile]) {
         guard let data = try? JSONEncoder().encode(profiles) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+}
+
+private struct ModelSelectionStore {
+    private let key = "kodanto.selectedModelByProfile"
+
+    func load(for profileID: UUID) -> String? {
+        values()[profileID.uuidString]
+    }
+
+    func save(_ modelID: String, for profileID: UUID) {
+        var updated = values()
+        updated[profileID.uuidString] = modelID
+        UserDefaults.standard.set(updated, forKey: key)
+    }
+
+    func remove(for profileID: UUID) {
+        var updated = values()
+        updated.removeValue(forKey: profileID.uuidString)
+        UserDefaults.standard.set(updated, forKey: key)
+    }
+
+    private func values() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
     }
 }
