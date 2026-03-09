@@ -9,6 +9,8 @@ struct MainView: View {
     @State private var promptEditorHeight: CGFloat = 0
     @State private var showingConnectionPopover = false
 
+    private let transcriptScrollTarget = "transcript-bottom"
+
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
     private static let composerNSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
@@ -214,79 +216,103 @@ struct MainView: View {
                     header(for: session)
                     Divider()
                     ZStack(alignment: .bottom) {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 18) {
-                                ForEach(model.selectedSessionMessages) { envelope in
-                                    MessageCard(envelope: envelope)
-                                }
-
-                                if !model.sessionTodos.isEmpty {
-                                    InspectorSection(title: "Todos") {
-                                        ForEach(Array(model.sessionTodos.enumerated()), id: \.offset) { _, todo in
-                                            HStack {
-                                                Text(todo.content)
-                                                Spacer()
-                                                Text(todo.status)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        }
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 18) {
+                                    ForEach(model.selectedSessionMessages) { envelope in
+                                        MessageCard(envelope: envelope)
                                     }
-                                }
 
-                                if !model.permissions.isEmpty {
-                                    InspectorSection(title: "Permissions") {
-                                        ForEach(model.permissions) { request in
-                                            VStack(alignment: .leading, spacing: 8) {
-                                                Text(request.permission)
-                                                    .font(.headline)
-                                                Text(request.patterns.joined(separator: ", "))
-                                                    .font(.caption)
-                                                    .foregroundStyle(.secondary)
+                                    if !model.sessionTodos.isEmpty {
+                                        InspectorSection(title: "Todos") {
+                                            ForEach(Array(model.sessionTodos.enumerated()), id: \.offset) { _, todo in
                                                 HStack {
-                                                    Button("Allow Once") {
-                                                        model.respondToPermission(request, reply: "once")
-                                                    }
-                                                    Button("Always") {
-                                                        model.respondToPermission(request, reply: "always")
-                                                    }
-                                                    Button("Reject", role: .destructive) {
-                                                        model.respondToPermission(request, reply: "reject")
-                                                    }
+                                                    Text(todo.content)
+                                                    Spacer()
+                                                    Text(todo.status)
+                                                        .foregroundStyle(.secondary)
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                if !model.questions.isEmpty {
-                                    InspectorSection(title: "Questions") {
-                                        ForEach(model.questions) { request in
-                                            VStack(alignment: .leading, spacing: 10) {
-                                                Text(request.questions.first?.question ?? "Question")
-                                                    .font(.headline)
-                                                if let options = request.questions.first?.options, !options.isEmpty {
-                                                    ForEach(options) { option in
-                                                        Button(option.label) {
-                                                            model.answerQuestion(request, answers: [[option.label]])
+                                    if !model.permissions.isEmpty {
+                                        InspectorSection(title: "Permissions") {
+                                            ForEach(model.permissions) { request in
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    Text(request.permission)
+                                                        .font(.headline)
+                                                    Text(request.patterns.joined(separator: ", "))
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                    HStack {
+                                                        Button("Allow Once") {
+                                                            model.respondToPermission(request, reply: "once")
+                                                        }
+                                                        Button("Always") {
+                                                            model.respondToPermission(request, reply: "always")
+                                                        }
+                                                        Button("Reject", role: .destructive) {
+                                                            model.respondToPermission(request, reply: "reject")
                                                         }
                                                     }
                                                 }
-                                                Button("Reject", role: .destructive) {
-                                                    model.rejectQuestion(request)
+                                            }
+                                        }
+                                    }
+
+                                    if !model.questions.isEmpty {
+                                        InspectorSection(title: "Questions") {
+                                            ForEach(model.questions) { request in
+                                                VStack(alignment: .leading, spacing: 10) {
+                                                    Text(request.questions.first?.question ?? "Question")
+                                                        .font(.headline)
+                                                    if let options = request.questions.first?.options, !options.isEmpty {
+                                                        ForEach(options) { option in
+                                                            Button(option.label) {
+                                                                model.answerQuestion(request, answers: [[option.label]])
+                                                            }
+                                                        }
+                                                    }
+                                                    Button("Reject", role: .destructive) {
+                                                        model.rejectQuestion(request)
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
 
-                                Color.clear
-                                    .frame(height: composerReservedHeight)
+                                    Color.clear
+                                        .frame(height: composerReservedHeight)
+
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id(transcriptScrollTarget)
+                                }
+                                .padding()
+                                .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
+                                .frame(maxWidth: .infinity, alignment: .center)
                             }
-                            .padding()
-                            .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
-                            .frame(maxWidth: .infinity, alignment: .center)
+                            .defaultScrollAnchor(.bottom)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .onChange(of: model.selectedSessionTranscriptRevision) { _, _ in
+                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                            }
+                            .onChange(of: model.sessionTodos.count) { _, _ in
+                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                            }
+                            .onChange(of: model.permissions.count) { _, _ in
+                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                            }
+                            .onChange(of: model.questions.count) { _, _ in
+                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                            }
+                            .onChange(of: model.isSelectedSessionRunning) { _, isRunning in
+                                if isRunning {
+                                    scrollTranscriptToBottom(using: proxy)
+                                }
+                            }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                         composer(maxHeight: composerMaxHeight)
                             .frame(maxWidth: Self.composerMaxWidth)
@@ -515,6 +541,21 @@ struct MainView: View {
             return "Connect"
         }
     }
+
+    private func scrollTranscriptToBottomIfNeeded(using proxy: ScrollViewProxy) {
+        guard model.isSelectedSessionRunning else { return }
+        scrollTranscriptToBottom(using: proxy)
+    }
+
+    private func scrollTranscriptToBottom(using proxy: ScrollViewProxy) {
+        let action = {
+            proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
+        }
+
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18), action)
+        }
+    }
 }
 
 private struct DiagnosticsSheet: View {
@@ -719,6 +760,8 @@ private struct MessageCard: View {
                         MarkdownText(text: value.text)
                             .font(.callout)
                             .foregroundStyle(.secondary)
+                    case .tool(let value):
+                        ToolCallCard(tool: value)
                     default:
                         Text(part.summary)
                             .font(.callout)
@@ -733,6 +776,43 @@ private struct MessageCard: View {
             .background(Color(NSColor.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.15)))
         }
+    }
+}
+
+private struct ToolCallCard: View {
+    let tool: OpenCodePart.Tool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(tool.displayTitle)
+                    .font(.callout.weight(.semibold))
+
+                Text(tool.state.status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let command = tool.command, !command.isEmpty {
+                Text(command)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            }
+
+            if let error = tool.state.error, !error.isEmpty {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 

@@ -540,10 +540,20 @@ enum OpenCodePart: Decodable, Identifiable, Hashable {
 
     struct Tool: Decodable, Hashable {
         struct State: Decodable, Hashable {
+            struct Time: Decodable, Hashable {
+                let start: Double
+                let end: Double?
+                let compacted: Double?
+            }
+
             let status: String
+            let input: [String: JSONValue]?
+            let raw: String?
             let title: String?
             let output: String?
             let error: String?
+            let metadata: [String: JSONValue]?
+            let time: Time?
         }
 
         let id: String
@@ -715,7 +725,7 @@ enum OpenCodePart: Decodable, Identifiable, Hashable {
         case .reasoning(let value):
             return value.text
         case .tool(let value):
-            return value.state.title ?? "Tool: \(value.tool)"
+            return value.displayTitle
         case .file(let value):
             return value.filename ?? value.url
         case .patch(let value):
@@ -831,6 +841,16 @@ enum OpenCodePart: Decodable, Identifiable, Hashable {
         default:
             return nil
         }
+    }
+}
+
+extension OpenCodePart.Tool {
+    var displayTitle: String {
+        state.title ?? "Tool: \(tool)"
+    }
+
+    var command: String? {
+        state.input?["command"]?.stringValue
     }
 }
 
@@ -1010,6 +1030,13 @@ enum JSONValue: Codable, Hashable {
         case .null:
             try container.encodeNil()
         }
+    }
+}
+
+private extension JSONValue {
+    var stringValue: String? {
+        guard case .string(let value) = self else { return nil }
+        return value
     }
 }
 

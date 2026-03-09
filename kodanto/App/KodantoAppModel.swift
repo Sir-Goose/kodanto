@@ -42,6 +42,7 @@ final class KodantoAppModel {
     var sessions: [OpenCodeSession] = []
     var selectedSessionID: OpenCodeSession.ID?
     var selectedSessionMessages: [OpenCodeMessageEnvelope] = []
+    var selectedSessionTranscriptRevision = 0
     var sessionTodos: [OpenCodeTodo] = []
     var permissions: [OpenCodePermissionRequest] = []
     var questions: [OpenCodeQuestionRequest] = []
@@ -147,6 +148,20 @@ final class KodantoAppModel {
 
     var reconnectCount: Int {
         liveSync.reconnectCount
+    }
+
+    var isSelectedSessionRunning: Bool {
+        guard let selectedProject, let selectedSessionID else { return false }
+        guard let status = sessionStatusesByDirectory[selectedProject.worktree]?[selectedSessionID] else {
+            return false
+        }
+
+        switch status {
+        case .busy, .retry:
+            return true
+        case .idle:
+            return false
+        }
     }
 
     var diagnostics: DiagnosticsSnapshot {
@@ -339,13 +354,24 @@ final class KodantoAppModel {
     }
 
     func selectSession(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
-        Task {
-            guard let profile = selectedProfile, let project = project(for: projectID) else { return }
-            selectedProjectID = project.id
-            applySelectedProjectCache()
-            selectedSessionID = sessionID
-            sessionSidebarIndicators.clearIndicator(for: sessionID, in: project.worktree)
+        guard let profile = selectedProfile, let project = project(for: projectID) else { return }
 
+        let isSwitchingSessions = selectedSessionID != sessionID || selectedProjectID != project.id
+        selectedProjectID = project.id
+        applySelectedProjectCache()
+        selectedSessionID = sessionID
+        sessionSidebarIndicators.clearIndicator(for: sessionID, in: project.worktree)
+
+        if isSwitchingSessions {
+            resetMessageCaches()
+            selectedSessionMessages = []
+            selectedSessionTranscriptRevision &+= 1
+            sessionTodos = []
+            permissions = []
+            questions = []
+        }
+
+        Task {
             do {
                 let client = OpenCodeAPIClient(profile: profile)
                 if sessionsByDirectory[project.worktree] == nil {
@@ -804,6 +830,7 @@ final class KodantoAppModel {
     private func rebuildSelectedSessionMessages() {
         guard let selectedSessionID else {
             selectedSessionMessages = []
+            selectedSessionTranscriptRevision &+= 1
             return
         }
 
@@ -816,6 +843,7 @@ final class KodantoAppModel {
                     parts: (messagePartsByMessageID[message.id] ?? []).sorted(by: sortParts)
                 )
             }
+        selectedSessionTranscriptRevision &+= 1
     }
 
     private func resetMessageCaches() {
