@@ -559,15 +559,9 @@ private struct ProjectSidebarRow: View {
                 .foregroundStyle(.secondary)
                 .padding(.top, 1)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(project.displayName)
-                    .font(.body.weight(isActive ? .semibold : .regular))
-                    .foregroundStyle(.primary)
-                Text(project.worktree)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Text(project.displayName)
+                .font(.body.weight(isActive ? .semibold : .regular))
+                .foregroundStyle(.primary)
 
             Spacer(minLength: 0)
         }
