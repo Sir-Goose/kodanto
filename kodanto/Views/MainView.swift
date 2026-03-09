@@ -700,33 +700,39 @@ private struct SessionSidebarIndicator: View {
 private struct MessageCard: View {
     let envelope: OpenCodeMessageEnvelope
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(envelope.info.roleLabel)
-                .font(.headline)
+    private var visibleParts: [OpenCodePart] {
+        envelope.parts.filter(\.isVisibleInTranscript)
+    }
 
-             ForEach(envelope.parts) { part in
-                 switch part {
-                 case .text(let value):
-                    MarkdownText(text: value.text)
-                         .textSelection(.enabled)
-                 case .reasoning(let value):
-                    MarkdownText(text: value.text)
-                         .font(.callout)
-                         .foregroundStyle(.secondary)
-                 default:
-                    Text(part.summary)
-                        .font(.callout)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    var body: some View {
+        if !visibleParts.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(envelope.info.roleLabel)
+                    .font(.headline)
+
+                ForEach(visibleParts) { part in
+                    switch part {
+                    case .text(let value):
+                        MarkdownText(text: value.text)
+                            .textSelection(.enabled)
+                    case .reasoning(let value):
+                        MarkdownText(text: value.text)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    default:
+                        Text(part.summary)
+                            .font(.callout)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    }
                 }
             }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(NSColor.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.15)))
         }
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(NSColor.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.15)))
     }
 }
 

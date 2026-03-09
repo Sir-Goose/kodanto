@@ -801,6 +801,15 @@ enum OpenCodePart: Decodable, Identifiable, Hashable {
         }
     }
 
+    var isVisibleInTranscript: Bool {
+        switch self {
+        case .stepStart, .stepFinish:
+            return false
+        default:
+            return true
+        }
+    }
+
     func applyingDelta(field: String, delta: String) -> OpenCodePart? {
         switch self {
         case .text(let value) where field == "text":

@@ -21,7 +21,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		34A3BB5E2F5DA6C6005149D1 /* kodanto.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = kodanto.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		34A3BB5E2F5DA6C6005149D1 /* Kodanto.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kodanto.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F1A10012F5E000100000001 /* kodantoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kodantoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7F1A10132F5E000100000001 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = Platforms/MacOSX.platform/Developer/Library/Frameworks/XCTest.framework; sourceTree = DEVELOPER_DIR; };
 /* End PBXFileReference section */
@@ -71,7 +71,7 @@
 		34A3BB5F2F5DA6C6005149D1 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				34A3BB5E2F5DA6C6005149D1 /* kodanto.app */,
+				34A3BB5E2F5DA6C6005149D1 /* Kodanto.app */,
 				7F1A10012F5E000100000001 /* kodantoTests.xctest */,
 			);
 			name = Products;
@@ -106,8 +106,8 @@
 			name = kodanto;
 			packageProductDependencies = (
 			);
-			productName = kodanto;
-			productReference = 34A3BB5E2F5DA6C6005149D1 /* kodanto.app */;
+			productName = Kodanto;
+			productReference = 34A3BB5E2F5DA6C6005149D1 /* Kodanto.app */;
 			productType = "com.apple.product-type.application";
 		};
 		7F1A10062F5E000100000001 /* kodantoTests */ = {
@@ -345,14 +345,17 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Kodanto;
+				INFOPLIST_KEY_CFBundleName = Kodanto;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				PRODUCT_MODULE_NAME = kodanto;
 				PRODUCT_BUNDLE_IDENTIFIER = mallison.kodanto;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Kodanto;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -375,14 +378,17 @@
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Kodanto;
+				INFOPLIST_KEY_CFBundleName = Kodanto;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
+				PRODUCT_MODULE_NAME = kodanto;
 				PRODUCT_BUNDLE_IDENTIFIER = mallison.kodanto;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Kodanto;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -411,7 +417,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = mallison.kodantoTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/kodanto.app/Contents/MacOS/kodanto";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kodanto.app/Contents/MacOS/Kodanto";
 				TEST_TARGET_NAME = kodanto;
 			};
 			name = Debug;
@@ -434,7 +440,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = mallison.kodantoTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/kodanto.app/Contents/MacOS/kodanto";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kodanto.app/Contents/MacOS/Kodanto";
 				TEST_TARGET_NAME = kodanto;
 			};
 			name = Release;
