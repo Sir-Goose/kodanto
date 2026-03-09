@@ -25,6 +25,15 @@ final class KodantoAppModel {
         case failed(String)
     }
 
+    private enum RefreshScope {
+        case full
+        case liveData
+
+        var includesModelCatalog: Bool {
+            self == .full
+        }
+    }
+
     var profiles: [ServerProfile] = []
     var selectedProfileID: ServerProfile.ID?
     var connectionState: ConnectionState = .idle
@@ -99,6 +108,12 @@ final class KodantoAppModel {
         availableModelGroups
             .flatMap(\.models)
             .first(where: { $0.id == selectedModelID })
+    }
+
+    var selectedModelSelection: PromptRequestBody.ModelSelection? {
+        selectedModel.map {
+            PromptRequestBody.ModelSelection(providerID: $0.providerID, modelID: $0.modelID)
+        }
     }
 
     var canCreateSession: Bool {
@@ -217,7 +232,7 @@ final class KodantoAppModel {
 
             let health = try await client.health()
             connectionState = .connected(version: health.version)
-            try await refreshAll(using: client)
+            try await refreshAll(using: client, scope: .full)
             startLiveSync(for: profile)
         } catch {
             connectionState = .failed(error.localizedDescription)
@@ -228,7 +243,7 @@ final class KodantoAppModel {
         Task {
             guard let profile = selectedProfile else { return }
             do {
-                try await refreshAll(using: OpenCodeAPIClient(profile: profile))
+                try await refreshAll(using: OpenCodeAPIClient(profile: profile), scope: .full)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -297,9 +312,7 @@ final class KodantoAppModel {
                     sessionID: session.id,
                     directory: project.worktree,
                     text: text,
-                    model: selectedModel.map {
-                        PromptRequestBody.ModelSelection(providerID: $0.providerID, modelID: $0.modelID)
-                    }
+                    model: selectedModelSelection
                 )
                 try await loadSessionDetail(using: client)
                 try await loadSessions(for: project, using: client)
@@ -369,7 +382,7 @@ final class KodantoAppModel {
         }
     }
 
-    private func refreshAll(using client: OpenCodeAPIClient) async throws {
+    private func refreshAll(using client: OpenCodeAPIClient, scope: RefreshScope) async throws {
         async let pathInfoTask = client.pathInfo(directory: nil)
         async let projectsTask = client.projects()
 
@@ -379,12 +392,13 @@ final class KodantoAppModel {
         pathInfo = resolvedPathInfo
         projects = loadedProjects
 
-        do {
-            try await loadAvailableModels(using: client)
-        } catch {
-            availableModelGroups = []
-            isLoadingModels = false
-            modelLoadError = error.localizedDescription
+        if scope.includesModelCatalog {
+            do {
+                try await refreshModelCatalog(using: client)
+            } catch {
+                modelLoadError = error.localizedDescription
+                isLoadingModels = false
+            }
         }
 
         if selectedProjectID == nil || !loadedProjects.contains(where: { $0.id == selectedProjectID }) {
@@ -484,7 +498,7 @@ final class KodantoAppModel {
                         if Task.isCancelled { return }
                         let shouldRefresh = liveSync.receiveEvent(event)
                         if shouldRefresh {
-                            try await refreshAll(using: client)
+                            try await refreshAll(using: client, scope: .liveData)
                         }
                         applyGlobalEvent(event)
                     }
@@ -813,7 +827,7 @@ final class KodantoAppModel {
         return profile
     }
 
-    private func loadAvailableModels(using client: OpenCodeAPIClient) async throws {
+    private func refreshModelCatalog(using client: OpenCodeAPIClient) async throws {
         isLoadingModels = true
         modelLoadError = nil
         defer { isLoadingModels = false }
@@ -823,10 +837,13 @@ final class KodantoAppModel {
 
         let config = try await configTask
         let providersResponse = try await providersTask
-        applyAvailableModels(config: config, providersResponse: providersResponse)
+        applyModelCatalog(resolvedModelCatalog(config: config, providersResponse: providersResponse))
     }
 
-    private func applyAvailableModels(config: OpenCodeConfig, providersResponse: OpenCodeConfigProviders) {
+    private func resolvedModelCatalog(
+        config: OpenCodeConfig,
+        providersResponse: OpenCodeConfigProviders
+    ) -> ResolvedModelCatalog {
         let groups = providersResponse.providers
             .map { provider in
                 OpenCodeModelProviderGroup(
@@ -852,23 +869,32 @@ final class KodantoAppModel {
             .sorted {
                 $0.providerName.localizedCaseInsensitiveCompare($1.providerName) == .orderedAscending
             }
+            .filter { !$0.models.isEmpty }
 
-        availableModelGroups = groups.filter { !$0.models.isEmpty }
-
-        let availableIDs = Set(availableModelGroups.flatMap(\.models).map(\.id))
+        let availableIDs = Set(groups.flatMap(\.models).map(\.id))
         let storedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
         let configuredModelID = normalizedModelIdentifier(config.model)
-        let providerDefaultModelID = resolvedProviderDefaultModelID(from: providersResponse.default, groups: availableModelGroups)
+        let providerDefaultModelID = resolvedProviderDefaultModelID(from: providersResponse.default, groups: groups)
 
-        let resolvedSelection = [selectedModelID, storedModelID, configuredModelID, providerDefaultModelID, availableModelGroups.first?.models.first?.id]
+        let resolvedSelection = [selectedModelID, storedModelID, configuredModelID, providerDefaultModelID, groups.first?.models.first?.id]
             .compactMap { $0 }
             .first(where: { availableIDs.contains($0) })
 
-        selectedModelID = resolvedSelection
+        return ResolvedModelCatalog(groups: groups, selectedModelID: resolvedSelection)
+    }
+
+    private func applyModelCatalog(_ catalog: ResolvedModelCatalog) {
+        if availableModelGroups != catalog.groups {
+            availableModelGroups = catalog.groups
+        }
+
+        if selectedModelID != catalog.selectedModelID {
+            selectedModelID = catalog.selectedModelID
+        }
 
         guard let profileID = selectedProfileID else { return }
-        if let resolvedSelection {
-            modelSelectionStore.save(resolvedSelection, for: profileID)
+        if let selectedModelID = catalog.selectedModelID {
+            modelSelectionStore.save(selectedModelID, for: profileID)
         } else {
             modelSelectionStore.remove(for: profileID)
         }
@@ -900,6 +926,11 @@ final class KodantoAppModel {
         }
 
         return nil
+    }
+
+    private struct ResolvedModelCatalog {
+        let groups: [OpenCodeModelProviderGroup]
+        let selectedModelID: String?
     }
 }
 

@@ -13,7 +13,7 @@ struct MainView: View {
     private static let composerNSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     private static let messageColumnMaxWidth: CGFloat = 760
     private static let composerMaxWidth: CGFloat = 770
-    private static let composerModelRowHeight: CGFloat = 34
+    static let composerModelRowHeight: CGFloat = 34
 
     private var promptLineHeight: CGFloat {
         Self.composerNSFont.ascender - Self.composerNSFont.descender + Self.composerNSFont.leading
@@ -383,7 +383,7 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .frame(height: resolvedPromptHeight, alignment: .topLeading)
 
-                modelPickerRow
+                ModelPickerRow(model: model)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
@@ -407,77 +407,6 @@ struct MainView: View {
                 .stroke(Color.secondary.opacity(0.18))
         )
         .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
-    }
-
-    private var modelPickerRow: some View {
-        HStack(spacing: 10) {
-            Text("Model")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            if model.isLoadingModels {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Loading models...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if let selectedModel = model.selectedModel {
-                Menu {
-                    ForEach(model.availableModelGroups) { group in
-                        Section(group.providerName) {
-                            ForEach(group.models) { option in
-                                Button {
-                                    model.selectModel(option.id)
-                                } label: {
-                                    if option.id == selectedModel.id {
-                                        Label(option.modelName, systemImage: "checkmark")
-                                    } else {
-                                        Text(option.modelName)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text(selectedModel.modelName)
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(selectedModel.providerName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
-                .menuStyle(.borderlessButton)
-                .help(selectedModel.id)
-            } else if let modelLoadError = model.modelLoadError {
-                Text(modelLoadError)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } else {
-                Text("No models available")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(minHeight: Self.composerModelRowHeight, alignment: .center)
     }
 
     private func header(for session: OpenCodeSession) -> some View {
@@ -747,6 +676,87 @@ private struct MessageCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.windowBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.15)))
+    }
+}
+
+private struct ModelPickerRow: View {
+    @Bindable var model: KodantoAppModel
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Model")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if model.isLoadingModels {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Loading models...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else if let selectedModel = model.selectedModel {
+                Menu {
+                    ForEach(model.availableModelGroups) { group in
+                        Menu {
+                            ForEach(group.models) { option in
+                                Button {
+                                    model.selectModel(option.id)
+                                } label: {
+                                    if option.id == selectedModel.id {
+                                        Label(option.modelName, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.modelName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            if group.providerID == selectedModel.providerID {
+                                Label(group.providerName, systemImage: "checkmark")
+                            } else {
+                                Text(group.providerName)
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .trailing, spacing: 1) {
+                            Text(selectedModel.modelName)
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                            Text(selectedModel.providerName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .menuStyle(.borderlessButton)
+                .help(selectedModel.id)
+            } else if let modelLoadError = model.modelLoadError {
+                Text(modelLoadError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                Text("No models available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: MainView.composerModelRowHeight, alignment: .center)
     }
 }
 
