@@ -8,6 +8,7 @@ struct MainView: View {
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var promptEditorHeight: CGFloat = 0
     @State private var showingConnectionPopover = false
+    @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
 
     private let transcriptScrollTarget = "transcript-bottom"
 
@@ -295,17 +296,25 @@ struct MainView: View {
                             }
                             .defaultScrollAnchor(.bottom)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            .onAppear {
+                                pendingInitialBottomSessionID = model.selectedSessionID
+                                jumpTranscriptToBottom(using: proxy)
+                            }
+                            .onChange(of: model.selectedSessionID) { _, sessionID in
+                                pendingInitialBottomSessionID = sessionID
+                                jumpTranscriptToBottom(using: proxy)
+                            }
                             .onChange(of: model.selectedSessionTranscriptRevision) { _, _ in
-                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                                handleTranscriptChange(using: proxy)
                             }
                             .onChange(of: model.sessionTodos.count) { _, _ in
-                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                                handleTranscriptChange(using: proxy)
                             }
                             .onChange(of: model.permissions.count) { _, _ in
-                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                                handleTranscriptChange(using: proxy)
                             }
                             .onChange(of: model.questions.count) { _, _ in
-                                scrollTranscriptToBottomIfNeeded(using: proxy)
+                                handleTranscriptChange(using: proxy)
                             }
                             .onChange(of: model.isSelectedSessionRunning) { _, isRunning in
                                 if isRunning {
@@ -545,6 +554,35 @@ struct MainView: View {
     private func scrollTranscriptToBottomIfNeeded(using proxy: ScrollViewProxy) {
         guard model.isSelectedSessionRunning else { return }
         scrollTranscriptToBottom(using: proxy)
+    }
+
+    private func handleTranscriptChange(using proxy: ScrollViewProxy) {
+        guard let selectedSessionID = model.selectedSessionID else { return }
+
+        if pendingInitialBottomSessionID == selectedSessionID {
+            jumpTranscriptToBottom(using: proxy)
+
+            if transcriptHasVisibleContent {
+                pendingInitialBottomSessionID = nil
+            }
+            return
+        }
+
+        scrollTranscriptToBottomIfNeeded(using: proxy)
+    }
+
+    private var transcriptHasVisibleContent: Bool {
+        !model.selectedSessionMessages.isEmpty || !model.sessionTodos.isEmpty || !model.permissions.isEmpty || !model.questions.isEmpty
+    }
+
+    private func jumpTranscriptToBottom(using proxy: ScrollViewProxy) {
+        let transaction = Transaction(animation: nil)
+
+        DispatchQueue.main.async {
+            withTransaction(transaction) {
+                proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
+            }
+        }
     }
 
     private func scrollTranscriptToBottom(using proxy: ScrollViewProxy) {
