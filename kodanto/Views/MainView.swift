@@ -409,14 +409,18 @@ struct MainView: View {
             Text(session.directory)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Label(model.sessionStatuses[session.id]?.label ?? "Unknown", systemImage: "bolt.horizontal.circle")
-                if let shareURL = session.share?.url {
-                    Label(shareURL, systemImage: "link")
+            if model.sessionStatuses[session.id] != nil || session.share?.url != nil {
+                HStack(spacing: 8) {
+                    if let status = model.sessionStatuses[session.id] {
+                        Label(status.label, systemImage: "bolt.horizontal.circle")
+                    }
+                    if let shareURL = session.share?.url {
+                        Label(shareURL, systemImage: "link")
+                    }
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
