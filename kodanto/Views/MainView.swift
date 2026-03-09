@@ -546,6 +546,7 @@ private struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
     let isActive: Bool
+    @State private var isHovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -569,10 +570,18 @@ private struct ProjectSidebarRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(backgroundColor, in: RoundedRectangle(cornerRadius: 10))
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 
     private var backgroundColor: Color {
-        isActive ? Color.accentColor.opacity(0.12) : Color.clear
+        if isActive {
+            return Color.accentColor.opacity(0.12)
+        }
+
+        return isHovered ? Color.secondary.opacity(0.08) : .clear
     }
 }
 
@@ -580,6 +589,7 @@ private struct SessionSidebarRow: View {
     let session: OpenCodeSession
     let status: OpenCodeSessionStatus?
     let isSelected: Bool
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -598,6 +608,10 @@ private struct SessionSidebarRow: View {
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: 9))
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
     }
 
     private var statusColor: Color {
@@ -612,7 +626,11 @@ private struct SessionSidebarRow: View {
     }
 
     private var rowBackground: Color {
-        isSelected ? Color.accentColor.opacity(0.16) : Color.secondary.opacity(0.05)
+        if isSelected {
+            return Color.accentColor.opacity(0.16)
+        }
+
+        return isHovered ? Color.secondary.opacity(0.08) : .clear
     }
 }
 
