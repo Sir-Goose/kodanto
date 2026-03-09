@@ -6,7 +6,6 @@ struct MainView: View {
     @State private var editingProfile: ServerProfile?
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
     @State private var promptEditorHeight: CGFloat = 0
-    @State private var composerOverlayHeight: CGFloat = 0
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -22,8 +21,16 @@ struct MainView: View {
         ceil(promptLineHeight + (Self.composerVerticalPadding * 2))
     }
 
-    private var composerScrollClearance: CGFloat {
-        composerOverlayHeight + 88
+    private static let composerOuterPadding: CGFloat = 16
+    private static let composerInnerPadding: CGFloat = 14
+    private static let composerButtonSize: CGFloat = 34
+    private static let composerContentGap: CGFloat = 12
+
+    private var composerReservedHeight: CGFloat {
+        max(max(promptEditorHeight, promptMinimumHeight), Self.composerButtonSize)
+        + (Self.composerInnerPadding * 2)
+        + Self.composerOuterPadding
+        + Self.composerContentGap
     }
 
     var body: some View {
@@ -283,7 +290,7 @@ struct MainView: View {
                                 }
 
                                 Color.clear
-                                    .frame(height: composerScrollClearance)
+                                    .frame(height: composerReservedHeight)
                             }
                             .padding()
                             .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
@@ -293,18 +300,9 @@ struct MainView: View {
 
                         composer(maxHeight: composerMaxHeight)
                             .frame(maxWidth: Self.composerMaxWidth)
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 16)
-                            .background {
-                                GeometryReader { proxy in
-                                    Color.clear
-                                        .preference(key: ComposerOverlayHeightPreferenceKey.self, value: proxy.size.height)
-                                }
-                            }
+                            .padding(.horizontal, Self.composerOuterPadding)
+                            .padding(.bottom, Self.composerOuterPadding)
                             .zIndex(1)
-                    }
-                    .onPreferenceChange(ComposerOverlayHeightPreferenceKey.self) { height in
-                        composerOverlayHeight = height
                     }
                 } else {
                     ContentUnavailableView("Select a session", systemImage: "bubble.left.and.text.bubble.right")
@@ -324,7 +322,8 @@ struct MainView: View {
                     text: $model.draftPrompt,
                     measuredHeight: $promptEditorHeight,
                     font: Self.composerNSFont,
-                    textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding)
+                    textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
+                    maxHeight: maxHeight
                 ) {
                     guard model.canSendPrompt else { return }
                     model.sendPrompt()
@@ -356,8 +355,7 @@ struct MainView: View {
             .disabled(!model.canSendPrompt)
             .help("Send")
         }
-        .padding(14)
-        .animation(.easeInOut(duration: 0.16), value: resolvedPromptHeight)
+        .padding(Self.composerInnerPadding)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -403,14 +401,6 @@ struct MainView: View {
             }
         }
         .font(.caption)
-    }
-}
-
-private struct ComposerOverlayHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

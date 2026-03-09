@@ -7,6 +7,7 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
 
     let font: NSFont
     let textInset: NSSize
+    let maxHeight: CGFloat
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -51,7 +52,7 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
-        scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollView.contentView.postsFrameChangedNotifications = true
         scrollView.documentView = textView
 
         context.coordinator.scrollView = scrollView
@@ -59,32 +60,46 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         textView.coordinator = context.coordinator
         NotificationCenter.default.addObserver(
             context.coordinator,
-            selector: #selector(Coordinator.clipViewBoundsDidChange(_:)),
-            name: NSView.boundsDidChangeNotification,
+            selector: #selector(Coordinator.clipViewFrameDidChange(_:)),
+            name: NSView.frameDidChangeNotification,
             object: scrollView.contentView
         )
-        DispatchQueue.main.async {
-            context.coordinator.recalculateHeight()
-        }
+        context.coordinator.scheduleHeightRecalculation()
 
         return scrollView
     }
 
     func updateNSView(_ nsView: PromptScrollView, context: Context) {
+        let previousParent = context.coordinator.parent
         context.coordinator.parent = self
 
         guard let textView = context.coordinator.textView else { return }
 
+        var needsHeightUpdate = false
+
         if textView.string != text {
             textView.string = text
+            needsHeightUpdate = true
         }
 
-        textView.font = font
-        textView.textContainerInset = textInset
+        if textView.font != font {
+            textView.font = font
+            needsHeightUpdate = true
+        }
+
+        if textView.textContainerInset != textInset {
+            textView.textContainerInset = textInset
+            needsHeightUpdate = true
+        }
+
+        if abs(previousParent.maxHeight - maxHeight) > 0.5 {
+            needsHeightUpdate = true
+        }
+
         textView.onSubmit = onSubmit
 
-        DispatchQueue.main.async {
-            context.coordinator.recalculateHeight()
+        if needsHeightUpdate {
+            context.coordinator.scheduleHeightRecalculation()
         }
     }
 
@@ -92,6 +107,10 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         var parent: AutoSizingPromptEditor
         weak var scrollView: PromptScrollView?
         weak var textView: PromptTextView?
+
+        private var isHeightRecalculationScheduled = false
+        private var isRecalculatingHeight = false
+        private var needsAnotherHeightPass = false
 
         init(parent: AutoSizingPromptEditor) {
             self.parent = parent
@@ -109,7 +128,7 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
                 parent.text = updatedText
             }
 
-            recalculateHeight()
+            scheduleHeightRecalculation()
         }
 
         func textDidEndEditing(_ notification: Notification) {
@@ -121,11 +140,45 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         }
 
         @objc
-        func clipViewBoundsDidChange(_ notification: Notification) {
-            pinTextViewportToTop()
+        func clipViewFrameDidChange(_ notification: Notification) {
+            scheduleHeightRecalculation()
         }
 
-        func recalculateHeight() {
+        func scheduleHeightRecalculation() {
+            if isRecalculatingHeight {
+                needsAnotherHeightPass = true
+                return
+            }
+
+            guard !isHeightRecalculationScheduled else { return }
+
+            isHeightRecalculationScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                self?.performHeightRecalculation()
+            }
+        }
+
+        private func performHeightRecalculation() {
+            isHeightRecalculationScheduled = false
+            recalculateHeight()
+        }
+
+        private func recalculateHeight() {
+            guard !isRecalculatingHeight else {
+                needsAnotherHeightPass = true
+                return
+            }
+
+            isRecalculatingHeight = true
+            defer {
+                isRecalculatingHeight = false
+
+                if needsAnotherHeightPass {
+                    needsAnotherHeightPass = false
+                    scheduleHeightRecalculation()
+                }
+            }
+
             guard let textView, let scrollView, let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
 
             let availableWidth = max(scrollView.contentSize.width, 1)
@@ -138,32 +191,20 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             let usedRect = layoutManager.usedRect(for: textContainer)
             let minimumLineHeight = ceil(layoutManager.defaultLineHeight(for: textView.font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)) + (textView.textContainerInset.height * 2))
             let contentHeight = max(minimumLineHeight, ceil(usedRect.height + (textView.textContainerInset.height * 2)))
-            let visibleHeight = max(scrollView.contentSize.height, minimumLineHeight)
-            let documentHeight = max(contentHeight, visibleHeight)
+            let targetVisibleHeight = min(contentHeight, max(parent.maxHeight, minimumLineHeight))
+            let documentHeight = max(contentHeight, targetVisibleHeight)
 
             if textView.frame.size.width != availableWidth || textView.frame.size.height != documentHeight {
                 textView.setFrameSize(NSSize(width: availableWidth, height: documentHeight))
             }
 
-            if parent.measuredHeight != contentHeight {
-                parent.measuredHeight = contentHeight
+            if abs(parent.measuredHeight - targetVisibleHeight) > 0.5 {
+                parent.measuredHeight = targetVisibleHeight
             }
 
-            let shouldScroll = contentHeight > visibleHeight + 0.5
+            let shouldScroll = contentHeight > targetVisibleHeight + 0.5
             if scrollView.hasVerticalScroller != shouldScroll {
                 scrollView.hasVerticalScroller = shouldScroll
-            }
-
-            pinTextViewportToTop()
-        }
-
-        private func pinTextViewportToTop() {
-            guard let scrollView else { return }
-
-            let targetOrigin = NSPoint(x: 0, y: 0)
-            if scrollView.contentView.bounds.origin != targetOrigin {
-                scrollView.contentView.scroll(to: targetOrigin)
-                scrollView.reflectScrolledClipView(scrollView.contentView)
             }
         }
     }
@@ -171,43 +212,15 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
 
 final class PromptScrollView: NSScrollView {
     override var acceptsFirstResponder: Bool { true }
-
-    override func layout() {
-        super.layout()
-        if let textView = documentView as? PromptTextView {
-            textView.coordinator?.recalculateHeight()
-        }
-    }
-
-    override func reflectScrolledClipView(_ clipView: NSClipView) {
-        super.reflectScrolledClipView(clipView)
-        if let textView = documentView as? PromptTextView {
-            textView.coordinator?.recalculateHeight()
-        }
-    }
 }
 
 final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
     weak var coordinator: AutoSizingPromptEditor.Coordinator?
 
-    override var frame: NSRect {
-        didSet {
-            if oldValue.size.width != frame.size.width {
-                textContainer?.containerSize = NSSize(width: bounds.width, height: CGFloat.greatestFiniteMagnitude)
-                coordinator?.recalculateHeight()
-            }
-        }
-    }
-
-    override func didChangeText() {
-        super.didChangeText()
-        coordinator?.recalculateHeight()
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        coordinator?.recalculateHeight()
+        coordinator?.scheduleHeightRecalculation()
     }
 
     override func keyDown(with event: NSEvent) {
