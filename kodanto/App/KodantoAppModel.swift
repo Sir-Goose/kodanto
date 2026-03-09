@@ -124,6 +124,19 @@ final class KodantoAppModel {
         selectedSession != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var canRefresh: Bool {
+        connectionState.isConnected
+    }
+
+    var canConnect: Bool {
+        switch connectionState {
+        case .idle, .failed:
+            return true
+        case .connecting, .connected:
+            return false
+        }
+    }
+
     var isLiveSyncActive: Bool {
         liveSync.state.isRunning
     }
@@ -242,6 +255,7 @@ final class KodantoAppModel {
     func refresh() {
         Task {
             guard let profile = selectedProfile else { return }
+            guard canRefresh else { return }
             do {
                 try await refreshAll(using: OpenCodeAPIClient(profile: profile), scope: .full)
             } catch {

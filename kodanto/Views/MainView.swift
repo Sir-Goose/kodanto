@@ -333,14 +333,18 @@ struct MainView: View {
 
             Divider()
 
-            Button("Connect") {
-                showingConnectionPopover = false
-                model.connect()
+            if model.canConnect {
+                Button(connectionActionTitle) {
+                    showingConnectionPopover = false
+                    model.connect()
+                }
             }
 
-            Button("Refresh") {
-                showingConnectionPopover = false
-                model.refresh()
+            if model.canRefresh {
+                Button("Refresh") {
+                    showingConnectionPopover = false
+                    model.refresh()
+                }
             }
 
             Button("Diagnostics") {
@@ -504,6 +508,15 @@ struct MainView: View {
 
     private var connectionToolbarHelp: String {
         "\(connectionStatusTitle). \(liveSyncStatusTitle)."
+    }
+
+    private var connectionActionTitle: String {
+        switch model.connectionState {
+        case .failed:
+            return "Reconnect"
+        default:
+            return "Connect"
+        }
     }
 }
 
