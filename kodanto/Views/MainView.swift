@@ -589,19 +589,10 @@ private struct SessionSidebarRow: View {
                 .fill(statusColor)
                 .frame(width: 7, height: 7)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.title)
-                    .font(.callout.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(status?.label ?? "Idle")
-                    Text(session.id)
-                        .lineLimit(1)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
+            Text(session.title)
+                .font(.callout.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
 
             Spacer(minLength: 0)
         }
