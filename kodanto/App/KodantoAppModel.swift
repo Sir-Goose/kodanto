@@ -42,7 +42,6 @@ final class KodantoAppModel {
     var sessions: [OpenCodeSession] = []
     var selectedSessionID: OpenCodeSession.ID?
     var selectedSessionMessages: [OpenCodeMessageEnvelope] = []
-    var sessionStatuses: [String: OpenCodeSessionStatus] = [:]
     var sessionTodos: [OpenCodeTodo] = []
     var permissions: [OpenCodePermissionRequest] = []
     var questions: [OpenCodeQuestionRequest] = []
@@ -68,6 +67,7 @@ final class KodantoAppModel {
     private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
     private var sessionsByDirectory: [String: [OpenCodeSession]] = [:]
     private var sessionStatusesByDirectory: [String: [String: OpenCodeSessionStatus]] = [:]
+    private var sessionSidebarIndicators = SessionSidebarIndicatorStore()
 
     private let reconnectDelay: Duration = .milliseconds(250)
 
@@ -185,6 +185,7 @@ final class KodantoAppModel {
         liveSync = LiveSyncTracker()
         sessionsByDirectory = [:]
         sessionStatusesByDirectory = [:]
+        sessionSidebarIndicators.reset()
         loadingSessionDirectories = []
         resetMessageCaches()
     }
@@ -268,8 +269,8 @@ final class KodantoAppModel {
         sessionsByDirectory[project.worktree] ?? []
     }
 
-    func sessionStatus(for session: OpenCodeSession, in project: OpenCodeProject) -> OpenCodeSessionStatus? {
-        sessionStatusesByDirectory[project.worktree]?[session.id]
+    func sessionSidebarIndicator(for session: OpenCodeSession, in project: OpenCodeProject) -> SessionSidebarIndicatorState {
+        sessionSidebarIndicators.indicator(for: session.id, in: project.worktree)
     }
 
     func hasLoadedSessions(for project: OpenCodeProject) -> Bool {
@@ -343,6 +344,7 @@ final class KodantoAppModel {
             selectedProjectID = project.id
             applySelectedProjectCache()
             selectedSessionID = sessionID
+            sessionSidebarIndicators.clearIndicator(for: sessionID, in: project.worktree)
 
             do {
                 let client = OpenCodeAPIClient(profile: profile)
@@ -425,7 +427,6 @@ final class KodantoAppModel {
 
         if projectsToRefresh.isEmpty {
             sessions = []
-            sessionStatuses = [:]
             selectedSessionID = nil
             selectedSessionMessages = []
             sessionTodos = []
@@ -450,8 +451,18 @@ final class KodantoAppModel {
         let loadedSessions = try await sessionsTask.sorted { $0.time.updated > $1.time.updated }
         let loadedStatuses = try await statusesTask
 
+        let previousStatuses = sessionStatusesByDirectory[project.worktree] ?? [:]
+
         sessionsByDirectory[project.worktree] = loadedSessions
         sessionStatusesByDirectory[project.worktree] = loadedStatuses
+        sessionSidebarIndicators.applyStatusMap(
+            loadedStatuses,
+            previousStatuses: previousStatuses,
+            sessionIDs: loadedSessions.map(\.id),
+            in: project.worktree,
+            selectedSessionID: selectedSessionID,
+            isSelectedDirectory: selectedProjectID == project.id
+        )
 
         guard selectedProjectID == project.id else { return }
 
@@ -459,6 +470,9 @@ final class KodantoAppModel {
 
         if selectedSessionID == nil || !loadedSessions.contains(where: { $0.id == selectedSessionID }) {
             selectedSessionID = loadedSessions.first?.id
+            if let selectedSessionID {
+                sessionSidebarIndicators.clearIndicator(for: selectedSessionID, in: project.worktree)
+            }
         }
 
         try await loadSessionDetail(using: client)
@@ -667,6 +681,7 @@ final class KodantoAppModel {
         var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
         cachedStatuses.removeValue(forKey: session.id)
         sessionStatusesByDirectory[directory] = cachedStatuses
+        sessionSidebarIndicators.removeSession(session.id, in: directory)
 
         if directoryMatchesSelection(directory) {
             applySelectedProjectCache()
@@ -686,8 +701,16 @@ final class KodantoAppModel {
 
     private func upsertSessionStatus(_ status: OpenCodeSessionStatus, sessionID: String, directory: String) {
         var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
+        let previousStatus = cachedStatuses[sessionID]
         cachedStatuses[sessionID] = status
         sessionStatusesByDirectory[directory] = cachedStatuses
+        sessionSidebarIndicators.applyStatus(
+            status,
+            previousStatus: previousStatus,
+            sessionID: sessionID,
+            in: directory,
+            isSelected: directoryMatchesSelection(directory) && selectedSessionID == sessionID
+        )
 
         if directoryMatchesSelection(directory) {
             applySelectedProjectCache()
@@ -807,12 +830,10 @@ final class KodantoAppModel {
     private func applySelectedProjectCache() {
         guard let selectedProject else {
             sessions = []
-            sessionStatuses = [:]
             return
         }
 
         sessions = sessionsByDirectory[selectedProject.worktree] ?? []
-        sessionStatuses = sessionStatusesByDirectory[selectedProject.worktree] ?? [:]
     }
 
     private func directoryMatchesSelection(_ directory: String) -> Bool {

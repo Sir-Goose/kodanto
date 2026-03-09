@@ -177,7 +177,7 @@ struct MainView: View {
                         } label: {
                             SessionSidebarRow(
                                 session: session,
-                                status: model.sessionStatus(for: session, in: project),
+                                indicator: model.sessionSidebarIndicator(for: session, in: project),
                                 isSelected: model.selectedSessionID == session.id
                             )
                         }
@@ -422,17 +422,10 @@ struct MainView: View {
             Text(session.directory)
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            if model.sessionStatuses[session.id] != nil || session.share?.url != nil {
-                HStack(spacing: 8) {
-                    if let status = model.sessionStatuses[session.id] {
-                        Label(status.label, systemImage: "bolt.horizontal.circle")
-                    }
-                    if let shareURL = session.share?.url {
-                        Label(shareURL, systemImage: "link")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if let shareURL = session.share?.url {
+                Label(shareURL, systemImage: "link")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -616,15 +609,13 @@ private struct ProjectSidebarRow: View {
 
 private struct SessionSidebarRow: View {
     let session: OpenCodeSession
-    let status: OpenCodeSessionStatus?
+    let indicator: SessionSidebarIndicatorState
     let isSelected: Bool
     @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
+            SessionSidebarIndicator(indicator: indicator)
 
             Text(session.title)
                 .font(.callout.weight(isSelected ? .semibold : .regular))
@@ -643,23 +634,66 @@ private struct SessionSidebarRow: View {
         }
     }
 
-    private var statusColor: Color {
-        switch status {
-        case .busy:
-            return .orange
-        case .retry:
-            return .yellow
-        default:
-            return .green
-        }
-    }
-
     private var rowBackground: Color {
         if isSelected {
             return Color.accentColor.opacity(0.16)
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+private struct SessionSidebarIndicator: View {
+    let indicator: SessionSidebarIndicatorState
+    @State private var isPulsing = false
+
+    private static let slotWidth: CGFloat = 10
+    private static let dotSize: CGFloat = 7
+    private static let pulseSize: CGFloat = 12
+
+    var body: some View {
+        ZStack {
+            switch indicator {
+            case .none:
+                Color.clear
+                    .frame(width: Self.dotSize, height: Self.dotSize)
+            case .running:
+                ZStack {
+                    Circle()
+                        .fill(Color.accentColor.opacity(0.22))
+                        .frame(width: Self.pulseSize, height: Self.pulseSize)
+                        .scaleEffect(isPulsing ? 1.15 : 0.7)
+                        .opacity(isPulsing ? 0.1 : 0.5)
+
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: Self.dotSize, height: Self.dotSize)
+                }
+            case .completedUnread:
+                Circle()
+                    .fill(.green)
+                    .frame(width: Self.dotSize, height: Self.dotSize)
+            }
+        }
+        .frame(width: Self.slotWidth, height: Self.pulseSize)
+        .onAppear {
+            updatePulseState()
+        }
+        .onChange(of: indicator) { _, _ in
+            updatePulseState()
+        }
+        .animation(
+            .easeInOut(duration: 0.85).repeatForever(autoreverses: true),
+            value: isPulsing
+        )
+    }
+
+    private func updatePulseState() {
+        if indicator == .running {
+            isPulsing = true
+        } else {
+            isPulsing = false
+        }
     }
 }
 

@@ -235,6 +235,111 @@ struct OpenCodeSessionStatusMap: Decodable {
     }
 }
 
+enum SessionSidebarIndicatorState: Equatable {
+    case none
+    case running
+    case completedUnread
+}
+
+struct SessionSidebarIndicatorStore {
+    private var statesByDirectory: [String: [String: SessionSidebarIndicatorState]] = [:]
+
+    func indicator(for sessionID: String, in directory: String) -> SessionSidebarIndicatorState {
+        statesByDirectory[directory]?[sessionID] ?? .none
+    }
+
+    mutating func applyStatusMap(
+        _ statuses: [String: OpenCodeSessionStatus],
+        previousStatuses: [String: OpenCodeSessionStatus],
+        sessionIDs: [String],
+        in directory: String,
+        selectedSessionID: String?,
+        isSelectedDirectory: Bool
+    ) {
+        let validIDs = Set(sessionIDs)
+        var states = statesByDirectory[directory] ?? [:]
+        states = states.filter { validIDs.contains($0.key) }
+
+        for sessionID in sessionIDs {
+            let currentStatus = statuses[sessionID] ?? .idle
+            let previousStatus = previousStatuses[sessionID]
+            let isSelected = isSelectedDirectory && selectedSessionID == sessionID
+
+            states[sessionID] = resolvedState(
+                current: currentStatus,
+                previous: previousStatus,
+                existing: states[sessionID] ?? .none,
+                isSelected: isSelected
+            )
+        }
+
+        statesByDirectory[directory] = states.filter { $0.value != .none }
+    }
+
+    mutating func applyStatus(
+        _ status: OpenCodeSessionStatus,
+        previousStatus: OpenCodeSessionStatus?,
+        sessionID: String,
+        in directory: String,
+        isSelected: Bool
+    ) {
+        var states = statesByDirectory[directory] ?? [:]
+        let nextState = resolvedState(
+            current: status,
+            previous: previousStatus,
+            existing: states[sessionID] ?? .none,
+            isSelected: isSelected
+        )
+
+        if nextState == .none {
+            states.removeValue(forKey: sessionID)
+        } else {
+            states[sessionID] = nextState
+        }
+
+        statesByDirectory[directory] = states
+    }
+
+    mutating func clearIndicator(for sessionID: String, in directory: String) {
+        var states = statesByDirectory[directory] ?? [:]
+        states.removeValue(forKey: sessionID)
+        statesByDirectory[directory] = states
+    }
+
+    mutating func removeSession(_ sessionID: String, in directory: String) {
+        clearIndicator(for: sessionID, in: directory)
+    }
+
+    mutating func reset() {
+        statesByDirectory = [:]
+    }
+
+    private func resolvedState(
+        current: OpenCodeSessionStatus,
+        previous: OpenCodeSessionStatus?,
+        existing: SessionSidebarIndicatorState,
+        isSelected: Bool
+    ) -> SessionSidebarIndicatorState {
+        if current.isRunning {
+            return .running
+        }
+
+        if isSelected {
+            return .none
+        }
+
+        if previous?.isRunning == true {
+            return .completedUnread
+        }
+
+        if existing == .completedUnread {
+            return .completedUnread
+        }
+
+        return .none
+    }
+}
+
 enum OpenCodeSessionStatus: Decodable, Hashable {
     case idle
     case busy
@@ -265,14 +370,15 @@ enum OpenCodeSessionStatus: Decodable, Hashable {
         }
     }
 
-    var label: String {
+}
+
+private extension OpenCodeSessionStatus {
+    var isRunning: Bool {
         switch self {
+        case .busy, .retry:
+            return true
         case .idle:
-            return "Idle"
-        case .busy:
-            return "Busy"
-        case .retry(let attempt, _, _):
-            return "Retry \(attempt)"
+            return false
         }
     }
 }
