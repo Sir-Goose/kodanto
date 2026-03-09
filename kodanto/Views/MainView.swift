@@ -5,6 +5,7 @@ struct MainView: View {
     @Bindable var model: KodantoAppModel
     @State private var editingProfile: ServerProfile?
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var promptEditorHeight: CGFloat = 0
     @State private var showingConnectionPopover = false
 
@@ -27,6 +28,7 @@ struct MainView: View {
     private static let composerInnerPadding: CGFloat = 14
     private static let composerButtonSize: CGFloat = 34
     private static let composerContentGap: CGFloat = 12
+    private static let collapsedHeaderLeadingInset: CGFloat = 124
 
     private var composerReservedHeight: CGFloat {
         max(max(promptEditorHeight, promptMinimumHeight), Self.composerButtonSize)
@@ -37,7 +39,7 @@ struct MainView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
             sidebar
         } detail: {
             detailPanel
@@ -435,7 +437,9 @@ struct MainView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
+        .padding(.leading, splitViewVisibility == .detailOnly ? Self.collapsedHeaderLeadingInset : 0)
         .background(.thinMaterial)
+        .animation(.easeInOut(duration: 0.16), value: splitViewVisibility)
     }
 
     private var connectionIndicatorColor: Color {
