@@ -425,7 +425,14 @@ struct MainView: View {
     private var connectionIndicatorColor: Color {
         switch model.connectionState {
         case .connected:
-            return model.isLiveSyncActive ? .green : .yellow
+            switch _model.wrappedValue.liveSyncPhase {
+            case .active:
+                return .green
+            case .connecting, .reconnecting:
+                return .yellow
+            case .inactive:
+                return .yellow
+            }
         case .connecting:
             return .yellow
         case .idle, .failed:
@@ -460,11 +467,27 @@ struct MainView: View {
     }
 
     private var liveSyncStatusTitle: String {
-        model.isLiveSyncActive ? "Live sync active" : "Live sync inactive"
+        switch _model.wrappedValue.liveSyncPhase {
+        case .inactive:
+            return "Live sync inactive"
+        case .connecting:
+            return "Live sync connecting"
+        case .active:
+            return "Live sync active"
+        case .reconnecting:
+            return "Live sync reconnecting"
+        }
     }
 
     private var liveSyncStatusSymbol: String {
-        model.isLiveSyncActive ? "dot.radiowaves.left.and.right" : "pause.circle"
+        switch _model.wrappedValue.liveSyncPhase {
+        case .inactive:
+            return "pause.circle"
+        case .connecting, .reconnecting:
+            return "arrow.trianglehead.clockwise"
+        case .active:
+            return "dot.radiowaves.left.and.right"
+        }
     }
 
     private var connectionToolbarHelp: String {

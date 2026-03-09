@@ -3,6 +3,55 @@ import Foundation
 struct OpenCodeSSEClient {
     let profile: ServerProfile
 
+    struct EventParser {
+        private let decoder = JSONDecoder()
+        private var buffer = ""
+
+        mutating func push(line: String) throws -> [OpenCodeGlobalEvent] {
+            let normalized = line.replacingOccurrences(of: "\r", with: "")
+
+            if normalized.isEmpty {
+                return try flush(strict: true)
+            }
+
+            guard normalized.hasPrefix(":") == false else {
+                return []
+            }
+
+            guard normalized.hasPrefix("data:") else {
+                return []
+            }
+
+            let payload = String(normalized.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            if !buffer.isEmpty {
+                buffer.append("\n")
+            }
+            buffer.append(payload)
+
+            return try flush(strict: false)
+        }
+
+        mutating func finish() throws -> [OpenCodeGlobalEvent] {
+            try flush(strict: true)
+        }
+
+        private mutating func flush(strict: Bool) throws -> [OpenCodeGlobalEvent] {
+            guard !buffer.isEmpty else { return [] }
+
+            do {
+                let data = Data(buffer.utf8)
+                let event = try decoder.decode(OpenCodeGlobalEvent.self, from: data)
+                buffer.removeAll(keepingCapacity: true)
+                return [event]
+            } catch {
+                if strict {
+                    throw error
+                }
+                return []
+            }
+        }
+    }
+
     func streamGlobalEvents() -> AsyncThrowingStream<OpenCodeGlobalEvent, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
@@ -21,25 +70,18 @@ struct OpenCodeSSEClient {
                         )
                     }
 
-                    let decoder = JSONDecoder()
-                    var buffer = ""
+                    var parser = EventParser()
 
                     for try await line in bytes.lines {
                         if Task.isCancelled { break }
 
-                        let normalized = line.replacingOccurrences(of: "\r", with: "")
-                        if normalized.isEmpty {
-                            try decodeEvent(from: buffer, decoder: decoder, continuation: continuation)
-                            buffer.removeAll(keepingCapacity: true)
-                            continue
+                        for event in try parser.push(line: line) {
+                            continuation.yield(event)
                         }
-
-                        buffer.append(normalized)
-                        buffer.append("\n")
                     }
 
-                    if !buffer.isEmpty {
-                        try decodeEvent(from: buffer, decoder: decoder, continuation: continuation)
+                    for event in try parser.finish() {
+                        continuation.yield(event)
                     }
 
                     continuation.finish()
@@ -54,31 +96,6 @@ struct OpenCodeSSEClient {
                 task.cancel()
             }
         }
-    }
-
-    private func decodeEvent(
-        from rawEvent: String,
-        decoder: JSONDecoder,
-        continuation: AsyncThrowingStream<OpenCodeGlobalEvent, Error>.Continuation
-    ) throws {
-        let lines = rawEvent
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .split(separator: "\n", omittingEmptySubsequences: false)
-
-        var dataLines: [String] = []
-
-        for line in lines {
-            if line.hasPrefix("data:") {
-                dataLines.append(String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces))
-            }
-        }
-
-        guard !dataLines.isEmpty else { return }
-        let payload = dataLines.joined(separator: "\n")
-        let data = Data(payload.utf8)
-        let event = try decoder.decode(OpenCodeGlobalEvent.self, from: data)
-        continuation.yield(event)
     }
 
     private func makeRequest(path: String) throws -> URLRequest {

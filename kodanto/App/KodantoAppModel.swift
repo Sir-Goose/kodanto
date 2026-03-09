@@ -43,21 +43,18 @@ final class KodantoAppModel {
     var showingConnectionSheet = false
     var showingDiagnostics = false
     var lastSSEError: String?
-    var reconnectCount = 0
     var loadingSessionDirectories: Set<String> = []
 
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
     private var globalEventTask: Task<Void, Never>?
     private var heartbeatWatchdogTask: Task<Void, Never>?
-    private var lastEventAt = Date.distantPast
-    private var didBootstrapLiveSync = false
+    private var liveSync = LiveSyncTracker()
     private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
     private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
     private var sessionsByDirectory: [String: [OpenCodeSession]] = [:]
     private var sessionStatusesByDirectory: [String: [String: OpenCodeSessionStatus]] = [:]
 
-    private let heartbeatTimeout: Duration = .seconds(15)
     private let reconnectDelay: Duration = .milliseconds(250)
 
     init() {
@@ -101,16 +98,24 @@ final class KodantoAppModel {
     }
 
     var isLiveSyncActive: Bool {
-        globalEventTask != nil
+        liveSync.state.isRunning
+    }
+
+    var liveSyncPhase: LiveSyncTracker.State {
+        liveSync.state
+    }
+
+    var reconnectCount: Int {
+        liveSync.reconnectCount
     }
 
     var diagnostics: DiagnosticsSnapshot {
         DiagnosticsSnapshot(
             serverURL: selectedProfile?.normalizedBaseURL ?? "Not configured",
             binaryPath: (try? SidecarProcess.executablePath()) ?? "Not found",
-            liveSyncState: isLiveSyncActive ? "Connected" : "Inactive",
+            liveSyncState: liveSync.state.label,
             reconnectCount: reconnectCount,
-            lastEventDescription: lastEventAt == .distantPast ? "No events yet" : RelativeDateTimeFormatter().localizedString(for: lastEventAt, relativeTo: .now),
+            lastEventDescription: liveSync.lastEventAt == .distantPast ? "No events yet" : RelativeDateTimeFormatter().localizedString(for: liveSync.lastEventAt, relativeTo: .now),
             lastError: lastSSEError,
             selectedProjectDirectory: selectedProject?.worktree,
             cachedProjects: sessionsByDirectory.keys.count,
@@ -132,9 +137,8 @@ final class KodantoAppModel {
         permissions = []
         questions = []
         pathInfo = nil
-        didBootstrapLiveSync = false
         lastSSEError = nil
-        reconnectCount = 0
+        liveSync = LiveSyncTracker()
         sessionsByDirectory = [:]
         sessionStatusesByDirectory = [:]
         loadingSessionDirectories = []
@@ -424,40 +428,40 @@ final class KodantoAppModel {
     private func startLiveSync(for profile: ServerProfile) {
         globalEventTask?.cancel()
         heartbeatWatchdogTask?.cancel()
-        didBootstrapLiveSync = false
-        lastEventAt = .now
+        liveSync.start()
         lastSSEError = nil
 
         globalEventTask = Task { [weak self] in
             guard let self else { return }
+            let client = OpenCodeAPIClient(profile: profile)
 
             while !Task.isCancelled {
                 do {
-                    if didBootstrapLiveSync {
-                        try await refreshAll(using: OpenCodeAPIClient(profile: profile))
-                    } else {
-                        didBootstrapLiveSync = true
-                    }
-
                     let sse = OpenCodeSSEClient(profile: profile)
                     startHeartbeatWatchdog(for: profile)
 
                     for try await event in sse.streamGlobalEvents() {
                         if Task.isCancelled { return }
-                        lastEventAt = .now
+                        let shouldRefresh = liveSync.receiveEvent(event)
+                        if shouldRefresh {
+                            try await refreshAll(using: client)
+                        }
                         applyGlobalEvent(event)
+                    }
+
+                    if !Task.isCancelled {
+                        markLiveSyncReconnectNeeded("Live sync stream ended. Reconnecting...")
                     }
                 } catch is CancellationError {
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    lastSSEError = error.localizedDescription
-                    connectionState = .failed(error.localizedDescription)
+                    markLiveSyncReconnectNeeded(error.localizedDescription)
                 }
 
                 stopHeartbeatWatchdog()
                 if Task.isCancelled { return }
-                reconnectCount += 1
+                liveSync.start()
                 try? await Task.sleep(for: reconnectDelay)
             }
         }
@@ -467,6 +471,7 @@ final class KodantoAppModel {
         globalEventTask?.cancel()
         globalEventTask = nil
         stopHeartbeatWatchdog()
+        liveSync.stop()
     }
 
     private func startHeartbeatWatchdog(for profile: ServerProfile) {
@@ -476,10 +481,9 @@ final class KodantoAppModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { return }
-                guard connectionState.isConnected else { continue }
-                guard lastEventAt.timeIntervalSinceNow < -15 else { continue }
-                lastSSEError = "Heartbeat timed out"
-                connectionState = .failed("Live sync disconnected. Reconnecting...")
+                guard liveSync.state.isRunning else { continue }
+                guard liveSync.isHeartbeatTimedOut() else { continue }
+                markLiveSyncReconnectNeeded("Heartbeat timed out")
                 globalEventTask?.cancel()
                 startLiveSync(for: profile)
                 return
@@ -490,6 +494,11 @@ final class KodantoAppModel {
     private func stopHeartbeatWatchdog() {
         heartbeatWatchdogTask?.cancel()
         heartbeatWatchdogTask = nil
+    }
+
+    private func markLiveSyncReconnectNeeded(_ reason: String) {
+        lastSSEError = reason
+        liveSync.markReconnectNeeded(reason: reason)
     }
 
     private func applyGlobalEvent(_ event: OpenCodeGlobalEvent) {
