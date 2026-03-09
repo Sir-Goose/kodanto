@@ -681,13 +681,11 @@ private struct MessageCard: View {
 
 private struct ModelPickerRow: View {
     @Bindable var model: KodantoAppModel
+    @State private var isHovered = false
+    @State private var isShowingPicker = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("Model")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
             if model.isLoadingModels {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -697,51 +695,41 @@ private struct ModelPickerRow: View {
                         .foregroundStyle(.secondary)
                 }
             } else if let selectedModel = model.selectedModel {
-                Menu {
-                    ForEach(model.availableModelGroups) { group in
-                        Menu {
-                            ForEach(group.models) { option in
-                                Button {
-                                    model.selectModel(option.id)
-                                } label: {
-                                    if option.id == selectedModel.id {
-                                        Label(option.modelName, systemImage: "checkmark")
-                                    } else {
-                                        Text(option.modelName)
-                                    }
-                                }
-                            }
-                        } label: {
-                            if group.providerID == selectedModel.providerID {
-                                Label(group.providerName, systemImage: "checkmark")
-                            } else {
-                                Text(group.providerName)
-                            }
-                        }
-                    }
+                Button {
+                    isShowingPicker.toggle()
                 } label: {
                     HStack(spacing: 10) {
-                        VStack(alignment: .trailing, spacing: 1) {
-                            Text(selectedModel.modelName)
-                                .font(.callout.weight(.medium))
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-                            Text(selectedModel.providerName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
+                        Text(selectedModel.modelName)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
 
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption.weight(.semibold))
+                        Text(selectedModel.providerName)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(modelPickerBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .animation(.easeInOut(duration: 0.12), value: isHovered)
                 }
-                .menuStyle(.borderlessButton)
+                .buttonStyle(.plain)
                 .help(selectedModel.id)
+                .accessibilityIdentifier("model-picker-button")
+                .onHover { hovering in
+                    isHovered = hovering
+                }
+                .popover(isPresented: $isShowingPicker, arrowEdge: .bottom) {
+                    ModelPickerPopover(
+                        groups: model.availableModelGroups,
+                        selectedModelID: selectedModel.id
+                    ) { option in
+                        model.selectModel(option.id)
+                        isShowingPicker = false
+                    }
+                }
             } else if let modelLoadError = model.modelLoadError {
                 Text(modelLoadError)
                     .font(.caption)
@@ -757,6 +745,176 @@ private struct ModelPickerRow: View {
             Spacer(minLength: 0)
         }
         .frame(minHeight: MainView.composerModelRowHeight, alignment: .center)
+    }
+
+    private var modelPickerBackground: Color {
+        if isShowingPicker {
+            return Color.accentColor.opacity(0.12)
+        }
+
+        return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+private struct ModelPickerPopover: View {
+    let groups: [OpenCodeModelProviderGroup]
+    let selectedModelID: String
+    let onSelect: (OpenCodeModelOption) -> Void
+
+    @State private var expandedProviderID: String?
+
+    init(
+        groups: [OpenCodeModelProviderGroup],
+        selectedModelID: String,
+        onSelect: @escaping (OpenCodeModelOption) -> Void
+    ) {
+        self.groups = groups
+        self.selectedModelID = selectedModelID
+        self.onSelect = onSelect
+        _expandedProviderID = State(initialValue: groups.first(where: { group in
+            group.models.contains(where: { $0.id == selectedModelID })
+        })?.id ?? groups.first?.id)
+    }
+
+    private var selectedProviderID: String? {
+        groups.first(where: { group in
+            group.models.contains(where: { $0.id == selectedModelID })
+        })?.id
+    }
+
+    private var idealHeight: CGFloat {
+        let visibleModelCount = groups.first(where: { $0.id == expandedProviderID })?.models.count ?? 0
+        let estimatedHeight = CGFloat(groups.count * 36) + CGFloat(visibleModelCount * 34) + 32
+        return min(max(estimatedHeight, 120), 320)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(groups) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.14)) {
+                                if expandedProviderID == group.id {
+                                    expandedProviderID = nil
+                                } else {
+                                    expandedProviderID = group.id
+                                }
+                            }
+                        } label: {
+                            ModelPickerProviderRow(
+                                group: group,
+                                isExpanded: expandedProviderID == group.id,
+                                isSelected: selectedProviderID == group.id
+                            )
+                        }
+                        .buttonStyle(.plain)
+
+                        if expandedProviderID == group.id {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(group.models) { option in
+                                    Button {
+                                        onSelect(option)
+                                    } label: {
+                                        ModelPickerOptionRow(
+                                            option: option,
+                                            isSelected: option.id == selectedModelID
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.leading, 18)
+                            .transition(.opacity)
+                        }
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(width: 300, height: idealHeight)
+        .accessibilityIdentifier("model-picker-popover")
+    }
+}
+
+private struct ModelPickerProviderRow: View {
+    let group: OpenCodeModelProviderGroup
+    let isExpanded: Bool
+    let isSelected: Bool
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 12, height: 12)
+
+            Text(group.providerName)
+                .font(.callout.weight(isSelected ? .medium : .regular))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.12)
+        }
+
+        return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+private struct ModelPickerOptionRow: View {
+    let option: OpenCodeModelOption
+    let isSelected: Bool
+    @State private var isHovered = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(option.modelName)
+                .font(.callout.weight(isSelected ? .medium : .regular))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            if isSelected {
+                Image(systemName: "checkmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tint)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.16)
+        }
+
+        return isHovered ? Color.secondary.opacity(0.08) : .clear
     }
 }
 
