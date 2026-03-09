@@ -635,16 +635,16 @@ private struct MessageCard: View {
             Text(envelope.info.roleLabel)
                 .font(.headline)
 
-            ForEach(envelope.parts) { part in
-                switch part {
-                case .text(let value):
-                    Text(value.text)
-                        .textSelection(.enabled)
-                case .reasoning(let value):
-                    Text(value.text)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                default:
+             ForEach(envelope.parts) { part in
+                 switch part {
+                 case .text(let value):
+                    MarkdownText(text: value.text)
+                         .textSelection(.enabled)
+                 case .reasoning(let value):
+                    MarkdownText(text: value.text)
+                         .font(.callout)
+                         .foregroundStyle(.secondary)
+                 default:
                     Text(part.summary)
                         .font(.callout)
                         .padding(10)
