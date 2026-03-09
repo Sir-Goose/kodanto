@@ -6,6 +6,7 @@ struct MainView: View {
     @State private var editingProfile: ServerProfile?
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
     @State private var promptEditorHeight: CGFloat = 0
+    @State private var showingConnectionPopover = false
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -47,6 +48,10 @@ struct MainView: View {
                 model.saveProfile(profile)
                 editingProfile = nil
             }
+        }
+        .background {
+            WindowTitlebarAccessory(content: connectionStatusButton)
+                .frame(width: 0, height: 0)
         }
         .task {
             if case .idle = model.connectionState {
@@ -105,25 +110,6 @@ struct MainView: View {
                     projectSection(for: project)
                 }
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 8) {
-                connectionStatus
-                HStack {
-                    Button("Connect") {
-                        model.connect()
-                    }
-                    Button("Refresh") {
-                        model.refresh()
-                    }
-                    if model.isLiveSyncActive {
-                        Label("Live", systemImage: "dot.radiowaves.left.and.right")
-                            .foregroundStyle(.green)
-                    }
-                }
-            }
-            .padding()
-            .background(.bar)
         }
         .navigationTitle("kodanto")
     }
@@ -313,6 +299,57 @@ struct MainView: View {
         }
     }
 
+    private var connectionStatusButton: some View {
+        Button {
+            showingConnectionPopover.toggle()
+        } label: {
+            Circle()
+                .fill(connectionIndicatorColor)
+                .frame(width: 12, height: 12)
+                .overlay {
+                    Circle()
+                        .stroke(.white.opacity(0.9), lineWidth: 1)
+                }
+                .shadow(color: connectionIndicatorColor.opacity(0.35), radius: 3)
+                .padding(.top, 10)
+                .padding(.leading, 6)
+                .padding(.bottom, 6)
+                .padding(.trailing, 20)
+        }
+        .buttonStyle(.plain)
+        .help(connectionToolbarHelp)
+        .popover(isPresented: $showingConnectionPopover, arrowEdge: .top) {
+            connectionPopover
+        }
+    }
+
+    private var connectionPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(connectionStatusTitle, systemImage: connectionStatusSymbol)
+            Label(liveSyncStatusTitle, systemImage: liveSyncStatusSymbol)
+
+            Divider()
+
+            Button("Connect") {
+                showingConnectionPopover = false
+                model.connect()
+            }
+
+            Button("Refresh") {
+                showingConnectionPopover = false
+                model.refresh()
+            }
+
+            Button("Diagnostics") {
+                showingConnectionPopover = false
+                model.showingDiagnostics = true
+            }
+        }
+        .labelStyle(.titleAndIcon)
+        .padding(16)
+        .frame(minWidth: 220, alignment: .leading)
+    }
+
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
 
@@ -385,22 +422,53 @@ struct MainView: View {
         .background(.thinMaterial)
     }
 
-    private var connectionStatus: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            switch model.connectionState {
-            case .idle:
-                Text("Not connected")
-            case .connecting:
-                Label("Connecting...", systemImage: "bolt.horizontal.circle")
-            case .connected(let version):
-                Label("Connected to opencode \(version)", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            case .failed(let message):
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
+    private var connectionIndicatorColor: Color {
+        switch model.connectionState {
+        case .connected:
+            return model.isLiveSyncActive ? .green : .yellow
+        case .connecting:
+            return .yellow
+        case .idle, .failed:
+            return .red
         }
-        .font(.caption)
+    }
+
+    private var connectionStatusTitle: String {
+        switch model.connectionState {
+        case .idle:
+            return "Not connected"
+        case .connecting:
+            return "Connecting..."
+        case .connected(let version):
+            return "Connected to opencode \(version)"
+        case .failed(let message):
+            return message
+        }
+    }
+
+    private var connectionStatusSymbol: String {
+        switch model.connectionState {
+        case .idle:
+            return "xmark.circle"
+        case .connecting:
+            return "bolt.horizontal.circle"
+        case .connected:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var liveSyncStatusTitle: String {
+        model.isLiveSyncActive ? "Live sync active" : "Live sync inactive"
+    }
+
+    private var liveSyncStatusSymbol: String {
+        model.isLiveSyncActive ? "dot.radiowaves.left.and.right" : "pause.circle"
+    }
+
+    private var connectionToolbarHelp: String {
+        "\(connectionStatusTitle). \(liveSyncStatusTitle)."
     }
 }
 
