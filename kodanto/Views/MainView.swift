@@ -555,6 +555,10 @@ private struct ProjectSidebarRow: View {
                 .frame(width: 12, height: 12)
                 .padding(.top, 3)
 
+            Image(systemName: "folder")
+                .foregroundStyle(.secondary)
+                .padding(.top, 1)
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(project.displayName)
                     .font(.body.weight(isActive ? .semibold : .regular))
