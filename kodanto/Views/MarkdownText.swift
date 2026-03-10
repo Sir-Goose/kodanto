@@ -1,12 +1,14 @@
 import Foundation
 import SwiftUI
 
-struct MarkdownText: View {
+struct MarkdownText: View, Equatable {
     let text: String
 
     var body: some View {
+        let blocks = MessageMarkdownRenderer.parseBlocks(text)
+
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(MessageMarkdownRenderer.parseBlocks(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 MarkdownBlockView(block: block)
             }
         }
@@ -15,6 +17,14 @@ struct MarkdownText: View {
 }
 
 enum MessageMarkdownRenderer {
+    private final class CachedBlocks: NSObject {
+        let blocks: [Block]
+
+        init(blocks: [Block]) {
+            self.blocks = blocks
+        }
+    }
+
     enum Block: Equatable {
         case paragraph(AttributedString)
         case heading(level: Int, text: AttributedString)
@@ -27,11 +37,38 @@ enum MessageMarkdownRenderer {
         let content: AttributedString
     }
 
-    nonisolated static func render(_ text: String) -> AttributedString {
-        render(text, parser: parseMarkdown)
+    static func render(_ text: String) -> AttributedString {
+        guard let attributed = try? AttributedString(
+            markdown: text,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        ) else {
+            return AttributedString(text)
+        }
+
+        return attributed
     }
 
-    nonisolated static func parseBlocks(_ text: String) -> [Block] {
+    static func parseBlocks(_ text: String) -> [Block] {
+        let key = text as NSString
+        if let cached = blockCache.object(forKey: key) {
+            return cached.blocks
+        }
+
+        let blocks = parseBlocksUncached(text)
+        blockCache.setObject(CachedBlocks(blocks: blocks), forKey: key, cost: key.length)
+        return blocks
+    }
+
+    private static let blockCache: NSCache<NSString, CachedBlocks> = {
+        let cache = NSCache<NSString, CachedBlocks>()
+        cache.countLimit = 512
+        cache.totalCostLimit = 4_000_000
+        return cache
+    }()
+
+    private static func parseBlocksUncached(_ text: String) -> [Block] {
         let normalized = text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
@@ -128,24 +165,7 @@ enum MessageMarkdownRenderer {
         return blocks
     }
 
-    nonisolated static func render(_ text: String, parser: (String) throws -> AttributedString) -> AttributedString {
-        guard let attributed = try? parser(text) else {
-            return AttributedString(text)
-        }
-
-        return attributed
-    }
-
-    private nonisolated static func parseMarkdown(_ text: String) throws -> AttributedString {
-        try AttributedString(
-            markdown: text,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
-        )
-    }
-
-    private nonisolated enum PendingListKind: Equatable {
+    private enum PendingListKind: Equatable {
         case unordered
         case ordered
     }
@@ -171,7 +191,7 @@ enum MessageMarkdownRenderer {
         let content: String
     }
 
-    private nonisolated static func openingCodeBlock(from line: String) -> PendingCodeBlock? {
+    private static func openingCodeBlock(from line: String) -> PendingCodeBlock? {
         guard isFenceDelimiter(line) else { return nil }
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         let language = trimmed
@@ -184,11 +204,11 @@ enum MessageMarkdownRenderer {
         return PendingCodeBlock(language: language, lines: [])
     }
 
-    private nonisolated static func isFenceDelimiter(_ line: String) -> Bool {
+    private static func isFenceDelimiter(_ line: String) -> Bool {
         line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
     }
 
-    private nonisolated static func parseHeading(from line: String) -> Heading? {
+    private static func parseHeading(from line: String) -> Heading? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         let hashes = trimmed.prefix { $0 == "#" }
         guard !hashes.isEmpty, hashes.count <= 6 else { return nil }
@@ -199,7 +219,7 @@ enum MessageMarkdownRenderer {
         return Heading(level: hashes.count, text: String(remainder.dropFirst()))
     }
 
-    private nonisolated static func parseListItem(from line: String) -> ParsedListItem? {
+    private static func parseListItem(from line: String) -> ParsedListItem? {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
 
         for marker in ["-", "*", "+"] {
@@ -224,7 +244,7 @@ enum MessageMarkdownRenderer {
         )
     }
 
-    private nonisolated static func isListContinuation(_ line: String) -> Bool {
+    private static func isListContinuation(_ line: String) -> Bool {
         let prefix = line.prefix { $0 == " " || $0 == "\t" }
         return prefix.contains("\t") || prefix.count >= 2
     }

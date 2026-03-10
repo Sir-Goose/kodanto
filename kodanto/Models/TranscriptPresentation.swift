@@ -3,18 +3,18 @@ import Foundation
 struct TranscriptTurn: Identifiable, Hashable {
     let user: OpenCodeMessageEnvelope?
     let assistantMessages: [OpenCodeMessageEnvelope]
+    let userVisibleParts: [OpenCodePart]
+    let assistantPartGroups: [AssistantPartGroup]
 
     var id: String {
         user?.id ?? assistantMessages.first?.id ?? "transcript-turn"
     }
 
-    var userVisibleParts: [OpenCodePart] {
-        guard let user else { return [] }
-        return user.parts.filter(\.isVisibleInUserTurn)
-    }
-
-    var assistantPartGroups: [AssistantPartGroup] {
-        AssistantPartGroup.build(from: assistantMessages)
+    init(user: OpenCodeMessageEnvelope?, assistantMessages: [OpenCodeMessageEnvelope]) {
+        self.user = user
+        self.assistantMessages = assistantMessages
+        userVisibleParts = user?.parts.filter(\.isVisibleInUserTurn) ?? []
+        assistantPartGroups = AssistantPartGroup.build(from: assistantMessages)
     }
 
     static func build(from messages: [OpenCodeMessageEnvelope]) -> [TranscriptTurn] {

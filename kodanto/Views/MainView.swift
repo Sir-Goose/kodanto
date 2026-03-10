@@ -42,10 +42,6 @@ struct MainView: View {
     private static let composerContentGap: CGFloat = 12
     private static let collapsedHeaderLeadingInset: CGFloat = 124
 
-    private var transcriptTurns: [TranscriptTurn] {
-        TranscriptTurn.build(from: model.selectedSessionMessages)
-    }
-
     var body: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
             sidebar
@@ -389,8 +385,8 @@ struct MainView: View {
                     VStack(spacing: 0) {
                         ScrollViewReader { proxy in
                             ScrollView {
-                                VStack(alignment: .leading, spacing: 18) {
-                                    ForEach(transcriptTurns) { turn in
+                                LazyVStack(alignment: .leading, spacing: 18) {
+                                    ForEach(model.selectedSessionTurns) { turn in
                                         TranscriptTurnView(
                                             turn: turn,
                                             worktreeRoot: model.selectedProject?.worktree,

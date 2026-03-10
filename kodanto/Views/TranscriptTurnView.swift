@@ -131,9 +131,11 @@ private struct TranscriptPartView: View {
         switch part {
         case .text(let value):
             MarkdownText(text: value.text)
+                .equatable()
                 .textSelection(.enabled)
         case .reasoning(let value):
             MarkdownText(text: value.text)
+                .equatable()
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
@@ -830,6 +832,7 @@ private struct MarkdownOutputBlock: View {
 
     var body: some View {
         MarkdownText(text: text)
+            .equatable()
             .textSelection(.enabled)
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)

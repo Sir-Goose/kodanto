@@ -58,6 +58,7 @@ final class KodantoAppModel {
     var sessions: [OpenCodeSession] = []
     var selectedSessionID: OpenCodeSession.ID?
     var selectedSessionMessages: [OpenCodeMessageEnvelope] = []
+    var selectedSessionTurns: [TranscriptTurn] = []
     var selectedSessionTranscriptRevision = 0
     var sessionTodos: [OpenCodeTodo] = []
     var permissions: [OpenCodePermissionRequest] = []
@@ -269,7 +270,7 @@ final class KodantoAppModel {
         selectedProjectID = nil
         sessions = []
         selectedSessionID = nil
-        selectedSessionMessages = []
+        clearSelectedSessionTranscript()
         sessionTodos = []
         permissions = []
         questions = []
@@ -410,8 +411,17 @@ final class KodantoAppModel {
             let client = OpenCodeAPIClient(profile: profile)
 
             if profile.kind == .localSidecar {
-                if (try? await client.health().healthy) != true {
-                    try sidecar.start(profile: profile)
+                let installedVersion = try? SidecarProcess.executableVersion()
+
+                if let health = try? await client.health(), health.healthy {
+                    if let installedVersion,
+                       !SidecarProcess.versionsMatch(health.version, installedVersion) {
+                        sidecarLog.append("Restarting local sidecar to use installed opencode \(installedVersion) instead of running \(health.version).\n")
+                        try await sidecar.restart(profile: profile)
+                        try await waitForServer(profile: profile)
+                    }
+                } else {
+                    try await sidecar.restart(profile: profile)
                     try await waitForServer(profile: profile)
                 }
             }
@@ -524,7 +534,7 @@ final class KodantoAppModel {
 
         if isSwitchingSessions {
             resetMessageCaches()
-            selectedSessionMessages = []
+            clearSelectedSessionTranscript()
             selectedSessionTranscriptRevision &+= 1
             sessionTodos = []
             permissions = []
@@ -655,7 +665,7 @@ final class KodantoAppModel {
         if projectsToRefresh.isEmpty {
             sessions = []
             selectedSessionID = nil
-            selectedSessionMessages = []
+            clearSelectedSessionTranscript()
             sessionTodos = []
             permissions = []
             questions = []
@@ -707,7 +717,7 @@ final class KodantoAppModel {
 
     private func loadSessionDetail(using client: OpenCodeAPIClient) async throws {
         guard let project = selectedProject else {
-            selectedSessionMessages = []
+            clearSelectedSessionTranscript()
             sessionTodos = []
             permissions = []
             questions = []
@@ -731,7 +741,7 @@ final class KodantoAppModel {
 
         guard let session = selectedSession else {
             resetMessageCaches()
-            selectedSessionMessages = []
+            clearSelectedSessionTranscript()
             sessionTodos = []
             return
         }
@@ -938,7 +948,7 @@ final class KodantoAppModel {
             selectedSessionID = sessions.first?.id
             if selectedSessionID == nil {
                 resetMessageCaches()
-                selectedSessionMessages = []
+                clearSelectedSessionTranscript()
                 sessionTodos = []
             } else {
                 rebuildSelectedSessionMessages()
@@ -1115,12 +1125,12 @@ final class KodantoAppModel {
 
     private func rebuildSelectedSessionMessages() {
         guard let selectedSessionID else {
-            selectedSessionMessages = []
+            clearSelectedSessionTranscript()
             selectedSessionTranscriptRevision &+= 1
             return
         }
 
-        selectedSessionMessages = sessionMessagesByID.values
+        let messages = sessionMessagesByID.values
             .filter { $0.sessionID == selectedSessionID }
             .sorted { $0.createdAt < $1.createdAt }
             .map { message in
@@ -1129,7 +1139,14 @@ final class KodantoAppModel {
                     parts: (messagePartsByMessageID[message.id] ?? []).sorted(by: sortParts)
                 )
             }
+        selectedSessionMessages = messages
+        selectedSessionTurns = TranscriptTurn.build(from: messages)
         selectedSessionTranscriptRevision &+= 1
+    }
+
+    private func clearSelectedSessionTranscript() {
+        selectedSessionMessages = []
+        selectedSessionTurns = []
     }
 
     private func resetMessageCaches() {
