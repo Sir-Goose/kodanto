@@ -133,7 +133,7 @@ struct MainView: View {
         let isExpanded = expandedProjectIDs.contains(project.id)
         let sessions = model.sessions(for: project)
 
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 ProjectSidebarRow(
                     project: project,
@@ -151,6 +151,7 @@ struct MainView: View {
                 }
                 .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
                     targetProjectID: project.id,
+                    surface: .rowSurface,
                     model: model,
                     draggedProjectID: $draggedProjectID,
                     dropTarget: $projectDropTarget
@@ -175,40 +176,60 @@ struct MainView: View {
             }
 
             if isExpanded {
-                if model.isLoadingSessions(for: project), sessions.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                    Text("Loading sessions")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.leading, 28)
-                    .padding(.vertical, 4)
-                } else if model.hasLoadedSessions(for: project), sessions.isEmpty {
-                    Text("No sessions yet")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 0) {
+                    if model.isLoadingSessions(for: project), sessions.isEmpty {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Loading sessions")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                         .padding(.leading, 28)
                         .padding(.vertical, 4)
-                } else {
-                    ForEach(sessions) { session in
-                        Button {
-                            model.selectSession(session.id, in: project.id)
-                        } label: {
-                            SessionSidebarRow(
-                                session: session,
-                                indicator: model.sessionSidebarIndicator(for: session, in: project),
-                                isSelected: model.selectedSessionID == session.id
-                            )
+                    } else if model.hasLoadedSessions(for: project), sessions.isEmpty {
+                        Text("No sessions yet")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, 28)
+                            .padding(.vertical, 4)
+                    } else {
+                        ForEach(sessions) { session in
+                            Button {
+                                model.selectSession(session.id, in: project.id)
+                            } label: {
+                                SessionSidebarRow(
+                                    session: session,
+                                    indicator: model.sessionSidebarIndicator(for: session, in: project),
+                                    isSelected: model.selectedSessionID == session.id
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.leading, 24)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.leading, 24)
                     }
                 }
+                .contentShape(Rectangle())
+                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
+                    targetProjectID: project.id,
+                    surface: .bottomGutter,
+                    model: model,
+                    draggedProjectID: $draggedProjectID,
+                    dropTarget: $projectDropTarget
+                ))
             }
+
+            Color.clear
+                .frame(height: ProjectDropPlacementResolver.gutterHeight)
+                .contentShape(Rectangle())
+                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
+                    targetProjectID: project.id,
+                    surface: .bottomGutter,
+                    model: model,
+                    draggedProjectID: $draggedProjectID,
+                    dropTarget: $projectDropTarget
+                ))
         }
-        .padding(.vertical, 3)
     }
 
     private func toggleProjectExpansion(for project: OpenCodeProject) {
@@ -733,15 +754,53 @@ private struct ProjectDropTarget: Equatable {
     let placement: ProjectDropPlacement
 }
 
+enum ProjectDropSurface {
+    case topGutter
+    case rowSurface
+    case bottomGutter
+}
+
+enum ProjectDropPlacementResolver {
+    static let gutterHeight: CGFloat = 3
+    static let rowHeight: CGFloat = 34
+
+    static func placement(
+        for surface: ProjectDropSurface,
+        locationY: CGFloat,
+        rowHeight: CGFloat = ProjectDropPlacementResolver.rowHeight
+    ) -> ProjectDropPlacement {
+        switch surface {
+        case .topGutter:
+            return .before
+        case .bottomGutter:
+            return .after
+        case .rowSurface:
+            let midpoint = max(rowHeight, 1) / 2
+            return locationY <= midpoint ? .before : .after
+        }
+    }
+}
+
+enum ProjectDropValidationResolver {
+    static func canDrop(
+        draggedProjectID: OpenCodeProject.ID?,
+        targetProjectID: OpenCodeProject.ID
+    ) -> Bool {
+        guard let draggedProjectID else { return false }
+        return draggedProjectID != targetProjectID
+    }
+}
+
 private struct ProjectSidebarDropDelegate: DropDelegate {
     let targetProjectID: OpenCodeProject.ID
+    let surface: ProjectDropSurface
     let model: KodantoAppModel
     @Binding var draggedProjectID: OpenCodeProject.ID?
     @Binding var dropTarget: ProjectDropTarget?
 
     func dropEntered(info: DropInfo) {
-        guard let draggedProjectID, draggedProjectID != targetProjectID else { return }
-        let placement = placement(for: info)
+        guard ProjectDropValidationResolver.canDrop(draggedProjectID: draggedProjectID, targetProjectID: targetProjectID) else { return }
+        let placement = ProjectDropPlacementResolver.placement(for: surface, locationY: info.location.y)
         let newTarget = ProjectDropTarget(projectID: targetProjectID, placement: placement)
 
         if dropTarget != newTarget {
@@ -750,11 +809,11 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard let draggedProjectID, draggedProjectID != targetProjectID else {
+        guard ProjectDropValidationResolver.canDrop(draggedProjectID: draggedProjectID, targetProjectID: targetProjectID) else {
             return DropProposal(operation: .forbidden)
         }
 
-        let placement = placement(for: info)
+        let placement = ProjectDropPlacementResolver.placement(for: surface, locationY: info.location.y)
         let newTarget = ProjectDropTarget(projectID: targetProjectID, placement: placement)
 
         if dropTarget != newTarget {
@@ -765,12 +824,15 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let draggedProjectID, draggedProjectID != targetProjectID else {
+        guard ProjectDropValidationResolver.canDrop(draggedProjectID: draggedProjectID, targetProjectID: targetProjectID),
+              let draggedProjectID
+        else {
             clearDropState()
             return false
         }
 
-        model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement(for: info))
+        let placement = ProjectDropPlacementResolver.placement(for: surface, locationY: info.location.y)
+        model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement)
         clearDropState()
         return true
     }
@@ -781,12 +843,10 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        guard let draggedProjectID else { return false }
-        return draggedProjectID != targetProjectID
-    }
-
-    private func placement(for info: DropInfo) -> ProjectDropPlacement {
-        info.location.y < 22 ? .before : .after
+        ProjectDropValidationResolver.canDrop(
+            draggedProjectID: draggedProjectID,
+            targetProjectID: targetProjectID
+        )
     }
 
     private func clearDropState() {

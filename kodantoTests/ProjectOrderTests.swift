@@ -1,5 +1,6 @@
 import XCTest
 @testable import kodanto
+import CoreGraphics
 
 @MainActor
 final class ProjectOrderTests: XCTestCase {
@@ -156,6 +157,78 @@ final class ProjectOrderTests: XCTestCase {
 
         XCTAssertEqual(store.load(for: firstProfileID), [])
         XCTAssertEqual(store.load(for: secondProfileID), ["project-c"])
+    }
+
+    func testDropPlacementResolverMapsTopGutterToBefore() {
+        XCTAssertEqual(
+            ProjectDropPlacementResolver.placement(
+                for: .topGutter,
+                locationY: 999
+            ),
+            .before
+        )
+    }
+
+    func testDropPlacementResolverMapsBottomGutterToAfter() {
+        XCTAssertEqual(
+            ProjectDropPlacementResolver.placement(
+                for: .bottomGutter,
+                locationY: 0
+            ),
+            .after
+        )
+    }
+
+    func testDropPlacementResolverUsesRowMidpointBoundary() {
+        XCTAssertEqual(
+            ProjectDropPlacementResolver.placement(
+                for: .rowSurface,
+                locationY: 16,
+                rowHeight: 34
+            ),
+            .before
+        )
+
+        XCTAssertEqual(
+            ProjectDropPlacementResolver.placement(
+                for: .rowSurface,
+                locationY: 17,
+                rowHeight: 34
+            ),
+            .before
+        )
+
+        XCTAssertEqual(
+            ProjectDropPlacementResolver.placement(
+                for: .rowSurface,
+                locationY: 18,
+                rowHeight: 34
+            ),
+            .after
+        )
+    }
+
+    func testDropValidationResolverForbidsSelfDropAndAllowsOtherProject() {
+        XCTAssertFalse(
+            ProjectDropValidationResolver.canDrop(
+                draggedProjectID: nil,
+                targetProjectID: "alpha"
+            )
+        )
+
+        XCTAssertFalse(
+            ProjectDropValidationResolver.canDrop(
+                draggedProjectID: "alpha",
+                targetProjectID: "alpha"
+            )
+        )
+
+        XCTAssertTrue(
+            ProjectDropValidationResolver.canDrop(
+                draggedProjectID: "beta",
+                targetProjectID: "alpha"
+            )
+        )
     }
 
     private func makeProject(id: String, updatedAt: Double) -> OpenCodeProject {
