@@ -5,6 +5,11 @@ import Observation
 @MainActor
 @Observable
 final class KodantoAppModel {
+    struct SessionNavigationTarget: Hashable {
+        let projectID: OpenCodeProject.ID
+        let sessionID: OpenCodeSession.ID
+    }
+
     struct DiagnosticsSnapshot {
         let serverURL: String
         let binaryPath: String
@@ -104,6 +109,16 @@ final class KodantoAppModel {
 
     var selectedSession: OpenCodeSession? {
         sessions.first(where: { $0.id == selectedSessionID })
+    }
+
+    func loadedSessionNavigationTarget(for sessionID: OpenCodeSession.ID) -> SessionNavigationTarget? {
+        guard let location = SessionNavigationTargetResolver.resolve(
+            sessionID: sessionID,
+            projects: projects,
+            sessionsByDirectory: sessionsByDirectory
+        ) else { return nil }
+
+        return SessionNavigationTarget(projectID: location.projectID, sessionID: location.sessionID)
     }
 
     var selectedModel: OpenCodeModelOption? {

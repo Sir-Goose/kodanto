@@ -1033,10 +1033,40 @@ enum JSONValue: Codable, Hashable {
     }
 }
 
-private extension JSONValue {
+extension JSONValue {
     var stringValue: String? {
         guard case .string(let value) = self else { return nil }
         return value
+    }
+
+    var numberValue: Double? {
+        guard case .number(let value) = self else { return nil }
+        return value
+    }
+
+    var intValue: Int? {
+        guard let numberValue else { return nil }
+        return Int(numberValue)
+    }
+
+    var boolValue: Bool? {
+        guard case .bool(let value) = self else { return nil }
+        return value
+    }
+
+    var objectValue: [String: JSONValue]? {
+        guard case .object(let value) = self else { return nil }
+        return value
+    }
+
+    var arrayValue: [JSONValue]? {
+        guard case .array(let value) = self else { return nil }
+        return value
+    }
+
+    func decoded<T: Decodable>(as type: T.Type) -> T? {
+        guard let data = try? JSONEncoder().encode(self) else { return nil }
+        return try? JSONDecoder().decode(type, from: data)
     }
 }
 

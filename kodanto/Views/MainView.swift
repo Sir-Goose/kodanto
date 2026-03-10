@@ -13,6 +13,8 @@ struct MainView: View {
     @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
     @State private var draggedProjectID: OpenCodeProject.ID?
     @State private var projectDropTarget: ProjectDropTarget?
+    @State private var transcriptDisclosureStates: [String: Bool] = [:]
+    @State private var patchDisclosureStates: [String: Bool] = [:]
     @State private var sidebarFocusedItem: SidebarFocusItem?
     @FocusState private var isSidebarFocused: Bool
 
@@ -39,6 +41,10 @@ struct MainView: View {
     private static let composerButtonSize: CGFloat = 34
     private static let composerContentGap: CGFloat = 12
     private static let collapsedHeaderLeadingInset: CGFloat = 124
+
+    private var transcriptTurns: [TranscriptTurn] {
+        TranscriptTurn.build(from: model.selectedSessionMessages)
+    }
 
     private var composerReservedHeight: CGFloat {
         max(max(promptEditorHeight, promptMinimumHeight), Self.composerButtonSize)
@@ -448,8 +454,19 @@ struct MainView: View {
                         ScrollViewReader { proxy in
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 18) {
-                                    ForEach(model.selectedSessionMessages) { envelope in
-                                        MessageCard(envelope: envelope)
+                                    ForEach(transcriptTurns) { turn in
+                                        TranscriptTurnView(
+                                            turn: turn,
+                                            worktreeRoot: model.selectedProject?.worktree,
+                                            resolveTaskTarget: { sessionID in
+                                                model.loadedSessionNavigationTarget(for: sessionID)
+                                            },
+                                            navigateToSession: { target in
+                                                model.selectSession(target.sessionID, in: target.projectID)
+                                            },
+                                            disclosureStates: $transcriptDisclosureStates,
+                                            patchDisclosureStates: $patchDisclosureStates
+                                        )
                                     }
 
                                     if !model.sessionTodos.isEmpty {
@@ -530,6 +547,8 @@ struct MainView: View {
                             }
                             .onChange(of: model.selectedSessionID) { _, sessionID in
                                 pendingInitialBottomSessionID = sessionID
+                                transcriptDisclosureStates = [:]
+                                patchDisclosureStates = [:]
                                 jumpTranscriptToBottom(using: proxy)
                             }
                             .onChange(of: model.selectedSessionTranscriptRevision) { _, _ in
