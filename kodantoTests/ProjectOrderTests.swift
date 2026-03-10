@@ -159,52 +159,151 @@ final class ProjectOrderTests: XCTestCase {
         XCTAssertEqual(store.load(for: secondProfileID), ["project-c"])
     }
 
-    func testDropPlacementResolverMapsTopGutterToBefore() {
+    func testDropFrameResolverRespectsProjectOrder() {
+        let framesByID: [String: CGRect] = [
+            "beta": CGRect(x: 0, y: 40, width: 100, height: 20),
+            "alpha": CGRect(x: 0, y: 0, width: 100, height: 20)
+        ]
+
+        let orderedFrames = ProjectDropFrameResolver.orderedFrames(
+            projectOrder: ["alpha", "beta", "gamma"],
+            projectHeaderFrames: framesByID
+        )
+
+        XCTAssertEqual(orderedFrames.map(\.projectID), ["alpha", "beta"])
+    }
+
+    func testDropTargetResolverClampsAboveFirstAndBelowLast() {
+        let frames = [
+            ProjectDropRowFrame(projectID: "alpha", minY: 0, maxY: 20),
+            ProjectDropRowFrame(projectID: "beta", minY: 40, maxY: 60)
+        ]
+
         XCTAssertEqual(
-            ProjectDropPlacementResolver.placement(
-                for: .topGutter,
-                locationY: 999
-            ),
-            .before
+            ProjectDropTargetResolver.resolve(locationY: -10, frames: frames),
+            ProjectDropTarget(projectID: "alpha", placement: .before)
+        )
+
+        XCTAssertEqual(
+            ProjectDropTargetResolver.resolve(locationY: 100, frames: frames),
+            ProjectDropTarget(projectID: "beta", placement: .after)
         )
     }
 
-    func testDropPlacementResolverMapsBottomGutterToAfter() {
+    func testDropTargetResolverUsesRowMidpointBoundary() {
+        let frames = [
+            ProjectDropRowFrame(projectID: "alpha", minY: 0, maxY: 20),
+            ProjectDropRowFrame(projectID: "beta", minY: 40, maxY: 60)
+        ]
+
         XCTAssertEqual(
-            ProjectDropPlacementResolver.placement(
-                for: .bottomGutter,
-                locationY: 0
-            ),
-            .after
+            ProjectDropTargetResolver.resolve(locationY: 9, frames: frames),
+            ProjectDropTarget(projectID: "alpha", placement: .before)
+        )
+
+        XCTAssertEqual(
+            ProjectDropTargetResolver.resolve(locationY: 10, frames: frames),
+            ProjectDropTarget(projectID: "alpha", placement: .before)
+        )
+
+        XCTAssertEqual(
+            ProjectDropTargetResolver.resolve(locationY: 11, frames: frames),
+            ProjectDropTarget(projectID: "alpha", placement: .after)
         )
     }
 
-    func testDropPlacementResolverUsesRowMidpointBoundary() {
+    func testDropTargetResolverMapsGapToNearestEdge() {
+        let frames = [
+            ProjectDropRowFrame(projectID: "alpha", minY: 0, maxY: 20),
+            ProjectDropRowFrame(projectID: "beta", minY: 40, maxY: 60)
+        ]
+
         XCTAssertEqual(
-            ProjectDropPlacementResolver.placement(
-                for: .rowSurface,
-                locationY: 16,
-                rowHeight: 34
-            ),
-            .before
+            ProjectDropTargetResolver.resolve(locationY: 27, frames: frames),
+            ProjectDropTarget(projectID: "alpha", placement: .after)
         )
 
         XCTAssertEqual(
-            ProjectDropPlacementResolver.placement(
-                for: .rowSurface,
-                locationY: 17,
-                rowHeight: 34
-            ),
-            .before
+            ProjectDropTargetResolver.resolve(locationY: 36, frames: frames),
+            ProjectDropTarget(projectID: "beta", placement: .before)
         )
+    }
+
+    func testSidebarFocusNavigatorMovesUpAndDownAcrossMixedRows() {
+        let serverID = UUID()
+        let items: [SidebarFocusItem] = [
+            .server(serverID),
+            .addConnection,
+            .project("alpha"),
+            .session(projectID: "alpha", sessionID: "session-1"),
+            .project("beta")
+        ]
 
         XCTAssertEqual(
-            ProjectDropPlacementResolver.placement(
-                for: .rowSurface,
-                locationY: 18,
-                rowHeight: 34
+            SidebarFocusNavigator.next(from: .project("alpha"), in: items),
+            .session(projectID: "alpha", sessionID: "session-1")
+        )
+        XCTAssertEqual(
+            SidebarFocusNavigator.previous(from: .project("alpha"), in: items),
+            .addConnection
+        )
+    }
+
+    func testSidebarFocusNavigatorFindsFirstSessionForProject() {
+        let items: [SidebarFocusItem] = [
+            .project("alpha"),
+            .session(projectID: "alpha", sessionID: "session-1"),
+            .session(projectID: "alpha", sessionID: "session-2"),
+            .project("beta")
+        ]
+
+        XCTAssertEqual(
+            SidebarFocusNavigator.firstSession(in: "alpha", from: items),
+            .session(projectID: "alpha", sessionID: "session-1")
+        )
+    }
+
+    func testSidebarFocusNavigatorReconcilesRemovedSessionToParentProject() {
+        let oldItems: [SidebarFocusItem] = [
+            .project("alpha"),
+            .session(projectID: "alpha", sessionID: "session-1"),
+            .project("beta")
+        ]
+        let newItems: [SidebarFocusItem] = [
+            .project("alpha"),
+            .project("beta")
+        ]
+
+        XCTAssertEqual(
+            SidebarFocusNavigator.reconcileFocus(
+                current: .session(projectID: "alpha", sessionID: "session-1"),
+                previousItems: oldItems,
+                updatedItems: newItems
             ),
-            .after
+            .project("alpha")
+        )
+    }
+
+    func testSidebarFocusNavigatorReconcilesRemovedProjectToPreviousItem() {
+        let oldItems: [SidebarFocusItem] = [
+            .server(UUID()),
+            .addConnection,
+            .project("alpha"),
+            .project("beta")
+        ]
+        let newItems: [SidebarFocusItem] = [
+            oldItems[0],
+            .addConnection,
+            .project("beta")
+        ]
+
+        XCTAssertEqual(
+            SidebarFocusNavigator.reconcileFocus(
+                current: .project("alpha"),
+                previousItems: oldItems,
+                updatedItems: newItems
+            ),
+            .addConnection
         )
     }
 

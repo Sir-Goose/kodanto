@@ -6,14 +6,18 @@ struct MainView: View {
     @Bindable var model: KodantoAppModel
     @State private var editingProfile: ServerProfile?
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
+    @State private var projectHeaderFrames: [OpenCodeProject.ID: CGRect] = [:]
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var promptEditorHeight: CGFloat = 0
     @State private var showingConnectionPopover = false
     @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
     @State private var draggedProjectID: OpenCodeProject.ID?
     @State private var projectDropTarget: ProjectDropTarget?
+    @State private var sidebarFocusedItem: SidebarFocusItem?
+    @FocusState private var isSidebarFocused: Bool
 
     private let transcriptScrollTarget = "transcript-bottom"
+    private let projectDropCoordinateSpace = "project-drop-coordinate-space"
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -76,55 +80,71 @@ struct MainView: View {
             model.sanitizeProjects()
             draggedProjectID = nil
             projectDropTarget = nil
+            if sidebarFocusedItem == nil {
+                sidebarFocusedItem = sidebarFocusableItems.first
+            }
         }
     }
 
     private var sidebar: some View {
-        List {
-            Section("Servers") {
-                ForEach(model.profiles) { profile in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(profile.name)
-                            Text(profile.normalizedBaseURL)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if model.selectedProfileID == profile.id {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.tint)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        model.selectProfile(profile.id)
-                    }
-                    .contextMenu {
-                        Button("Edit") {
-                            editingProfile = profile
-                            model.showingConnectionSheet = true
-                        }
-                        Button("Delete", role: .destructive) {
-                            model.deleteProfile(profile)
-                        }
-                        .disabled(model.profiles.count == 1)
-                    }
-                }
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                sidebarSectionHeader("Servers")
+                    .padding(.horizontal, 10)
 
-                Button {
-                    editingProfile = nil
-                    model.showingConnectionSheet = true
-                } label: {
-                    Label("Add Connection", systemImage: "plus")
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.profiles) { profile in
+                        serverRow(for: profile)
+                    }
+                    addConnectionRow
                 }
-            }
+                .padding(.horizontal, 8)
 
-            Section("Projects") {
-                ForEach(model.projects) { project in
-                    projectSection(for: project)
+                sidebarSectionHeader("Projects")
+                    .padding(.top, 12)
+                    .padding(.horizontal, 10)
+
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.projects) { project in
+                        projectSection(for: project)
+                    }
                 }
+                .padding(.horizontal, 8)
+                .coordinateSpace(name: projectDropCoordinateSpace)
+                .onPreferenceChange(ProjectHeaderFramePreferenceKey.self) { frames in
+                    projectHeaderFrames = frames
+                }
+                .contentShape(Rectangle())
+                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarContainerDropDelegate(
+                    model: model,
+                    projectOrder: model.projects.map(\.id),
+                    projectHeaderFrames: projectHeaderFrames,
+                    draggedProjectID: $draggedProjectID,
+                    dropTarget: $projectDropTarget
+                ))
             }
+            .padding(.vertical, 10)
+        }
+        .focusable()
+        .focused($isSidebarFocused)
+        .onMoveCommand(perform: handleSidebarMoveCommand)
+        .onKeyPress(.return, phases: .down) { _ in
+            guard isSidebarFocused else { return .ignored }
+            activateFocusedSidebarItem()
+            return .handled
+        }
+        .onKeyPress(.space, phases: .down) { _ in
+            guard isSidebarFocused else { return .ignored }
+            activateFocusedSidebarItem()
+            return .handled
+        }
+        .onChange(of: sidebarFocusableItems) { oldItems, newItems in
+            sidebarFocusedItem = SidebarFocusNavigator.reconcileFocus(
+                current: sidebarFocusedItem,
+                previousItems: oldItems,
+                updatedItems: newItems
+            )
+            projectHeaderFrames = projectHeaderFrames.filter { newItems.contains(.project($0.key)) }
         }
         .navigationTitle("kodanto")
     }
@@ -132,6 +152,8 @@ struct MainView: View {
     private func projectSection(for project: OpenCodeProject) -> some View {
         let isExpanded = expandedProjectIDs.contains(project.id)
         let sessions = model.sessions(for: project)
+        let projectFocusItem = SidebarFocusItem.project(project.id)
+        let isFocused = sidebarFocusedItem == projectFocusItem
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -139,10 +161,12 @@ struct MainView: View {
                     project: project,
                     isExpanded: isExpanded,
                     isActive: model.selectedProjectID == project.id,
+                    isFocused: isFocused,
                     dropPlacement: dropPlacement(for: project.id)
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    setSidebarFocus(projectFocusItem)
                     toggleProjectExpansion(for: project)
                 }
                 .onDrag {
@@ -167,39 +191,13 @@ struct MainView: View {
                 .help("New Session")
                 .disabled(model.selectedProfile == nil)
             }
-            .contentShape(Rectangle())
-            .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
-                targetProjectID: project.id,
-                surface: .rowSurface,
-                model: model,
-                draggedProjectID: $draggedProjectID,
-                dropTarget: $projectDropTarget
-            ))
-            .overlay(alignment: .top) {
-                Color.clear
-                    .frame(height: ProjectDropPlacementResolver.gutterHitHeight)
-                    .offset(y: -(ProjectDropPlacementResolver.gutterHitHeight / 2))
-                    .contentShape(Rectangle())
-                    .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
-                        targetProjectID: project.id,
-                        surface: .topGutter,
-                        model: model,
-                        draggedProjectID: $draggedProjectID,
-                        dropTarget: $projectDropTarget
-                    ))
-            }
-            .overlay(alignment: .bottom) {
-                Color.clear
-                    .frame(height: ProjectDropPlacementResolver.gutterHitHeight)
-                    .offset(y: ProjectDropPlacementResolver.gutterHitHeight / 2)
-                    .contentShape(Rectangle())
-                    .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
-                        targetProjectID: project.id,
-                        surface: .bottomGutter,
-                        model: model,
-                        draggedProjectID: $draggedProjectID,
-                        dropTarget: $projectDropTarget
-                    ))
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .preference(key: ProjectHeaderFramePreferenceKey.self, value: [
+                            project.id: proxy.frame(in: .named(projectDropCoordinateSpace))
+                        ])
+                }
             }
 
             if isExpanded {
@@ -222,13 +220,16 @@ struct MainView: View {
                             .padding(.vertical, 4)
                     } else {
                         ForEach(sessions) { session in
+                            let focusItem = SidebarFocusItem.session(projectID: project.id, sessionID: session.id)
                             Button {
+                                setSidebarFocus(focusItem)
                                 model.selectSession(session.id, in: project.id)
                             } label: {
                                 SessionSidebarRow(
                                     session: session,
                                     indicator: model.sessionSidebarIndicator(for: session, in: project),
-                                    isSelected: model.selectedSessionID == session.id
+                                    isSelected: model.selectedSessionID == session.id,
+                                    isFocused: sidebarFocusedItem == focusItem
                                 )
                             }
                             .buttonStyle(.plain)
@@ -236,16 +237,184 @@ struct MainView: View {
                         }
                     }
                 }
-                .contentShape(Rectangle())
-                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
-                    targetProjectID: project.id,
-                    surface: .bottomGutter,
-                    model: model,
-                    draggedProjectID: $draggedProjectID,
-                    dropTarget: $projectDropTarget
-                ))
             }
         }
+    }
+
+    private var sidebarFocusableItems: [SidebarFocusItem] {
+        var items = model.profiles.map { SidebarFocusItem.server($0.id) }
+        items.append(.addConnection)
+        for project in model.projects {
+            items.append(.project(project.id))
+            guard expandedProjectIDs.contains(project.id) else { continue }
+            for session in model.sessions(for: project) {
+                items.append(.session(projectID: project.id, sessionID: session.id))
+            }
+        }
+        return items
+    }
+
+    private func sidebarSectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.bottom, 4)
+    }
+
+    private func serverRow(for profile: ServerProfile) -> some View {
+        let focusItem = SidebarFocusItem.server(profile.id)
+        let isSelected = model.selectedProfileID == profile.id
+        let isFocused = sidebarFocusedItem == focusItem
+
+        return HStack {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(profile.name)
+                Text(profile.normalizedBaseURL)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.tint)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(serverRowBackground(isSelected: isSelected, isFocused: isFocused), in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            setSidebarFocus(focusItem)
+            model.selectProfile(profile.id)
+        }
+        .contextMenu {
+            Button("Edit") {
+                editingProfile = profile
+                model.showingConnectionSheet = true
+            }
+            Button("Delete", role: .destructive) {
+                model.deleteProfile(profile)
+            }
+            .disabled(model.profiles.count == 1)
+        }
+    }
+
+    private var addConnectionRow: some View {
+        let isFocused = sidebarFocusedItem == .addConnection
+        return HStack(spacing: 8) {
+            Image(systemName: "plus")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("Add Connection")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(connectionRowBackground(isFocused: isFocused), in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            setSidebarFocus(.addConnection)
+            presentAddConnection()
+        }
+    }
+
+    private func serverRowBackground(isSelected: Bool, isFocused: Bool) -> Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.14)
+        }
+        if isFocused {
+            return Color.secondary.opacity(0.14)
+        }
+        return .clear
+    }
+
+    private func connectionRowBackground(isFocused: Bool) -> Color {
+        isFocused ? Color.secondary.opacity(0.14) : .clear
+    }
+
+    private func setSidebarFocus(_ item: SidebarFocusItem) {
+        sidebarFocusedItem = item
+        isSidebarFocused = true
+    }
+
+    private func handleSidebarMoveCommand(_ direction: MoveCommandDirection) {
+        let items = sidebarFocusableItems
+        guard !items.isEmpty else { return }
+        isSidebarFocused = true
+
+        switch direction {
+        case .up:
+            sidebarFocusedItem = SidebarFocusNavigator.previous(from: sidebarFocusedItem, in: items)
+        case .down:
+            sidebarFocusedItem = SidebarFocusNavigator.next(from: sidebarFocusedItem, in: items)
+        case .left:
+            handleSidebarMoveLeft()
+        case .right:
+            handleSidebarMoveRight()
+        default:
+            break
+        }
+    }
+
+    private func handleSidebarMoveLeft() {
+        guard let sidebarFocusedItem else { return }
+
+        switch sidebarFocusedItem {
+        case let .project(projectID):
+            guard expandedProjectIDs.contains(projectID) else { return }
+            expandedProjectIDs.remove(projectID)
+        case let .session(projectID, _):
+            self.sidebarFocusedItem = .project(projectID)
+        default:
+            break
+        }
+    }
+
+    private func handleSidebarMoveRight() {
+        guard let sidebarFocusedItem else { return }
+
+        switch sidebarFocusedItem {
+        case let .project(projectID):
+            if expandedProjectIDs.contains(projectID) {
+                if let firstSession = SidebarFocusNavigator.firstSession(in: projectID, from: sidebarFocusableItems) {
+                    self.sidebarFocusedItem = firstSession
+                }
+            } else {
+                expandedProjectIDs.insert(projectID)
+                if let project = model.projects.first(where: { $0.id == projectID }) {
+                    model.loadSessionsIfNeeded(for: project)
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private func activateFocusedSidebarItem() {
+        guard let sidebarFocusedItem else {
+            if let firstItem = sidebarFocusableItems.first {
+                setSidebarFocus(firstItem)
+            }
+            return
+        }
+
+        switch sidebarFocusedItem {
+        case let .server(profileID):
+            model.selectProfile(profileID)
+        case .addConnection:
+            presentAddConnection()
+        case let .project(projectID):
+            guard let project = model.projects.first(where: { $0.id == projectID }) else { return }
+            toggleProjectExpansion(for: project)
+        case let .session(projectID, sessionID):
+            model.selectSession(sessionID, in: projectID)
+        }
+    }
+
+    private func presentAddConnection() {
+        editingProfile = nil
+        model.showingConnectionSheet = true
     }
 
     private func toggleProjectExpansion(for project: OpenCodeProject) {
@@ -705,6 +874,7 @@ private struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
     let isActive: Bool
+    let isFocused: Bool
     let dropPlacement: ProjectDropPlacement?
     @State private var isHovered = false
 
@@ -749,6 +919,9 @@ private struct ProjectSidebarRow: View {
         if isActive {
             return Color.accentColor.opacity(0.12)
         }
+        if isFocused {
+            return Color.secondary.opacity(0.14)
+        }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
     }
@@ -765,35 +938,67 @@ private struct ProjectSidebarRow: View {
     }
 }
 
-private struct ProjectDropTarget: Equatable {
+struct ProjectDropTarget: Equatable {
     let projectID: OpenCodeProject.ID
     let placement: ProjectDropPlacement
 }
 
-enum ProjectDropSurface {
-    case topGutter
-    case rowSurface
-    case bottomGutter
+struct ProjectDropRowFrame: Equatable {
+    let projectID: OpenCodeProject.ID
+    let minY: CGFloat
+    let maxY: CGFloat
+
+    var midpointY: CGFloat {
+        (minY + maxY) / 2
+    }
 }
 
-enum ProjectDropPlacementResolver {
-    static let gutterHitHeight: CGFloat = 8
-    static let rowHeight: CGFloat = 34
-
-    static func placement(
-        for surface: ProjectDropSurface,
-        locationY: CGFloat,
-        rowHeight: CGFloat = ProjectDropPlacementResolver.rowHeight
-    ) -> ProjectDropPlacement {
-        switch surface {
-        case .topGutter:
-            return .before
-        case .bottomGutter:
-            return .after
-        case .rowSurface:
-            let midpoint = max(rowHeight, 1) / 2
-            return locationY <= midpoint ? .before : .after
+enum ProjectDropFrameResolver {
+    static func orderedFrames(
+        projectOrder: [OpenCodeProject.ID],
+        projectHeaderFrames: [OpenCodeProject.ID: CGRect]
+    ) -> [ProjectDropRowFrame] {
+        projectOrder.compactMap { projectID in
+            guard let frame = projectHeaderFrames[projectID] else { return nil }
+            return ProjectDropRowFrame(projectID: projectID, minY: frame.minY, maxY: frame.maxY)
         }
+    }
+}
+
+enum ProjectDropTargetResolver {
+    static func resolve(
+        locationY: CGFloat,
+        frames: [ProjectDropRowFrame]
+    ) -> ProjectDropTarget? {
+        guard let firstFrame = frames.first, let lastFrame = frames.last else { return nil }
+
+        if locationY <= firstFrame.midpointY {
+            return ProjectDropTarget(projectID: firstFrame.projectID, placement: .before)
+        }
+
+        if locationY >= lastFrame.midpointY {
+            return ProjectDropTarget(projectID: lastFrame.projectID, placement: .after)
+        }
+
+        for (index, frame) in frames.enumerated() {
+            if locationY <= frame.maxY {
+                let placement: ProjectDropPlacement = locationY <= frame.midpointY ? .before : .after
+                return ProjectDropTarget(projectID: frame.projectID, placement: placement)
+            }
+
+            guard index + 1 < frames.count else { continue }
+            let nextFrame = frames[index + 1]
+            guard locationY >= frame.maxY, locationY <= nextFrame.minY else { continue }
+
+            let distanceToCurrentBottom = abs(locationY - frame.maxY)
+            let distanceToNextTop = abs(nextFrame.minY - locationY)
+            if distanceToCurrentBottom <= distanceToNextTop {
+                return ProjectDropTarget(projectID: frame.projectID, placement: .after)
+            }
+            return ProjectDropTarget(projectID: nextFrame.projectID, placement: .before)
+        }
+
+        return ProjectDropTarget(projectID: lastFrame.projectID, placement: .after)
     }
 }
 
@@ -807,67 +1012,146 @@ enum ProjectDropValidationResolver {
     }
 }
 
-private struct ProjectSidebarDropDelegate: DropDelegate {
-    let targetProjectID: OpenCodeProject.ID
-    let surface: ProjectDropSurface
+private struct ProjectSidebarContainerDropDelegate: DropDelegate {
     let model: KodantoAppModel
+    let projectOrder: [OpenCodeProject.ID]
+    let projectHeaderFrames: [OpenCodeProject.ID: CGRect]
     @Binding var draggedProjectID: OpenCodeProject.ID?
     @Binding var dropTarget: ProjectDropTarget?
 
     func dropEntered(info: DropInfo) {
-        guard ProjectDropValidationResolver.canDrop(draggedProjectID: draggedProjectID, targetProjectID: targetProjectID) else { return }
-        let placement = ProjectDropPlacementResolver.placement(for: surface, locationY: info.location.y)
-        let newTarget = ProjectDropTarget(projectID: targetProjectID, placement: placement)
-
-        if dropTarget != newTarget {
-            dropTarget = newTarget
-        }
+        dropTarget = resolvedTarget(for: info)
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard ProjectDropValidationResolver.canDrop(draggedProjectID: draggedProjectID, targetProjectID: targetProjectID) else {
+        guard draggedProjectID != nil else {
             return DropProposal(operation: .forbidden)
         }
 
-        let placement = ProjectDropPlacementResolver.placement(for: surface, locationY: info.location.y)
-        let newTarget = ProjectDropTarget(projectID: targetProjectID, placement: placement)
-
-        if dropTarget != newTarget {
-            dropTarget = newTarget
-        }
-
+        dropTarget = resolvedTarget(for: info)
         return DropProposal(operation: .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard ProjectDropValidationResolver.canDrop(draggedProjectID: draggedProjectID, targetProjectID: targetProjectID),
-              let draggedProjectID
-        else {
+        guard let draggedProjectID, let resolvedTarget = resolvedTarget(for: info) else {
             clearDropState()
             return false
         }
 
-        let placement = ProjectDropPlacementResolver.placement(for: surface, locationY: info.location.y)
-        model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement)
+        model.moveProject(draggedProjectID, relativeTo: resolvedTarget.projectID, placement: resolvedTarget.placement)
         clearDropState()
         return true
     }
 
     func dropExited(info: DropInfo) {
-        guard dropTarget?.projectID == targetProjectID else { return }
         dropTarget = nil
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        ProjectDropValidationResolver.canDrop(
-            draggedProjectID: draggedProjectID,
-            targetProjectID: targetProjectID
-        )
+        draggedProjectID != nil
     }
 
     private func clearDropState() {
         dropTarget = nil
         draggedProjectID = nil
+    }
+
+    private func resolvedTarget(for info: DropInfo) -> ProjectDropTarget? {
+        let orderedFrames = ProjectDropFrameResolver.orderedFrames(
+            projectOrder: projectOrder,
+            projectHeaderFrames: projectHeaderFrames
+        )
+
+        guard let target = ProjectDropTargetResolver.resolve(locationY: info.location.y, frames: orderedFrames) else {
+            return nil
+        }
+
+        guard ProjectDropValidationResolver.canDrop(
+            draggedProjectID: draggedProjectID,
+            targetProjectID: target.projectID
+        ) else {
+            return nil
+        }
+
+        return target
+    }
+}
+
+private struct ProjectHeaderFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [OpenCodeProject.ID: CGRect] = [:]
+
+    static func reduce(value: inout [OpenCodeProject.ID: CGRect], nextValue: () -> [OpenCodeProject.ID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
+enum SidebarFocusItem: Hashable {
+    case server(ServerProfile.ID)
+    case addConnection
+    case project(OpenCodeProject.ID)
+    case session(projectID: OpenCodeProject.ID, sessionID: OpenCodeSession.ID)
+}
+
+enum SidebarFocusNavigator {
+    static func next(from current: SidebarFocusItem?, in items: [SidebarFocusItem]) -> SidebarFocusItem? {
+        guard !items.isEmpty else { return nil }
+        guard let current, let currentIndex = items.firstIndex(of: current) else {
+            return items.first
+        }
+        let nextIndex = min(currentIndex + 1, items.count - 1)
+        return items[nextIndex]
+    }
+
+    static func previous(from current: SidebarFocusItem?, in items: [SidebarFocusItem]) -> SidebarFocusItem? {
+        guard !items.isEmpty else { return nil }
+        guard let current, let currentIndex = items.firstIndex(of: current) else {
+            return items.first
+        }
+        let previousIndex = max(currentIndex - 1, 0)
+        return items[previousIndex]
+    }
+
+    static func firstSession(
+        in projectID: OpenCodeProject.ID,
+        from items: [SidebarFocusItem]
+    ) -> SidebarFocusItem? {
+        items.first {
+            if case let .session(sessionProjectID, _) = $0 {
+                return sessionProjectID == projectID
+            }
+            return false
+        }
+    }
+
+    static func reconcileFocus(
+        current: SidebarFocusItem?,
+        previousItems: [SidebarFocusItem],
+        updatedItems: [SidebarFocusItem]
+    ) -> SidebarFocusItem? {
+        guard !updatedItems.isEmpty else { return nil }
+        guard let current else { return updatedItems.first }
+
+        if updatedItems.contains(current) {
+            return current
+        }
+
+        if case let .session(projectID, _) = current {
+            let projectItem = SidebarFocusItem.project(projectID)
+            if updatedItems.contains(projectItem) {
+                return projectItem
+            }
+        }
+
+        guard let previousIndex = previousItems.firstIndex(of: current) else {
+            return updatedItems.first
+        }
+
+        if previousIndex > 0 {
+            let fallbackIndex = min(previousIndex - 1, updatedItems.count - 1)
+            return updatedItems[fallbackIndex]
+        }
+
+        return updatedItems.first
     }
 }
 
@@ -875,6 +1159,7 @@ private struct SessionSidebarRow: View {
     let session: OpenCodeSession
     let indicator: SessionSidebarIndicatorState
     let isSelected: Bool
+    let isFocused: Bool
     @State private var isHovered = false
 
     var body: some View {
@@ -901,6 +1186,9 @@ private struct SessionSidebarRow: View {
     private var rowBackground: Color {
         if isSelected {
             return Color.accentColor.opacity(0.16)
+        }
+        if isFocused {
+            return Color.secondary.opacity(0.14)
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
