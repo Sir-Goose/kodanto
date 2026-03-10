@@ -126,6 +126,7 @@ struct MainView: View {
             .padding(.vertical, 10)
         }
         .focusable()
+        .focusEffectDisabled()
         .focused($isSidebarFocused)
         .onMoveCommand(perform: handleSidebarMoveCommand)
         .onKeyPress(.return, phases: .down) { _ in

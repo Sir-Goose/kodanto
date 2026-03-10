@@ -906,13 +906,15 @@ final class KodantoAppModel {
     }
 
     private func resolvedProjectOrder(for projects: [OpenCodeProject]) -> [OpenCodeProject] {
-        let storedProjectIDs = selectedProfileID.map { projectOrderStore.load(for: $0) } ?? []
-        return ProjectOrderResolver.orderedProjects(projects, storedIDs: storedProjectIDs)
+        let storedProjectReferences = selectedProfileID.map { projectOrderStore.load(for: $0) } ?? []
+        return ProjectOrderResolver.orderedProjects(projects, storedIDs: storedProjectReferences)
     }
 
     private func persistProjectOrder() {
         guard let selectedProfileID else { return }
-        projectOrderStore.save(ProjectOrderResolver.deduplicatedProjectIDs(projects.map(\.id)), for: selectedProfileID)
+        let storedProjectReferences = ProjectOrderResolver.storedProjectReferences(for: projects)
+        guard !storedProjectReferences.isEmpty else { return }
+        projectOrderStore.save(storedProjectReferences, for: selectedProfileID)
     }
 
     private func applySelectedProjectCache() {
@@ -1143,8 +1145,10 @@ struct ProjectOrderStore {
     }
 
     func save(_ projectIDs: [String], for profileID: UUID) {
+        let deduplicatedIDs = ProjectOrderResolver.deduplicatedProjectIDs(projectIDs)
+        guard !deduplicatedIDs.isEmpty else { return }
         var updated = values()
-        updated[profileID.uuidString] = ProjectOrderResolver.deduplicatedProjectIDs(projectIDs)
+        updated[profileID.uuidString] = deduplicatedIDs
         userDefaults.set(updated, forKey: key)
     }
 
@@ -1168,6 +1172,15 @@ enum ProjectOrderResolver {
     static func deduplicatedProjectIDs(_ projectIDs: [String]) -> [String] {
         var seenIDs: Set<String> = []
         return projectIDs.filter { seenIDs.insert($0).inserted }
+    }
+
+    static func storedProjectReferences(for projects: [OpenCodeProject]) -> [String] {
+        var seenReferences: Set<String> = []
+        return projects.compactMap { project in
+            let reference = projectIdentity(for: project)
+            guard seenReferences.insert(reference).inserted else { return nil }
+            return reference
+        }
     }
 
     static func matchesProjectLocation(_ lhs: String, _ rhs: String) -> Bool {
@@ -1209,8 +1222,8 @@ enum ProjectOrderResolver {
         let storedIndexes = Dictionary(uniqueKeysWithValues: deduplicatedProjectIDs(storedIDs).enumerated().map { ($1, $0) })
 
         return orderedByRecency.sorted { lhs, rhs in
-            let lhsStoredIndex = storedIndexes[lhs.id]
-            let rhsStoredIndex = storedIndexes[rhs.id]
+            let lhsStoredIndex = storedIndex(for: lhs, in: storedIndexes)
+            let rhsStoredIndex = storedIndex(for: rhs, in: storedIndexes)
 
             switch (lhsStoredIndex, rhsStoredIndex) {
             case let (lhsIndex?, rhsIndex?) where lhsIndex != rhsIndex:
@@ -1274,8 +1287,8 @@ enum ProjectOrderResolver {
         over existing: OpenCodeProject,
         storedIndexes: [String: Int]
     ) -> Bool {
-        let candidateStoredIndex = storedIndexes[candidate.id]
-        let existingStoredIndex = storedIndexes[existing.id]
+        let candidateStoredIndex = storedIndex(for: candidate, in: storedIndexes)
+        let existingStoredIndex = storedIndex(for: existing, in: storedIndexes)
 
         switch (candidateStoredIndex, existingStoredIndex) {
         case let (candidateIndex?, existingIndex?) where candidateIndex != existingIndex:
@@ -1291,6 +1304,11 @@ enum ProjectOrderResolver {
 
             return candidate.id.localizedCaseInsensitiveCompare(existing.id) == .orderedAscending
         }
+    }
+
+    private static func storedIndex(for project: OpenCodeProject, in storedIndexes: [String: Int]) -> Int? {
+        let references = [projectIdentity(for: project), project.id]
+        return references.compactMap { storedIndexes[$0] }.min()
     }
 }
 

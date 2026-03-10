@@ -121,6 +121,37 @@ final class ProjectOrderTests: XCTestCase {
         XCTAssertEqual(store.load(for: profileID), ["project-a", "project-b"])
     }
 
+    func testProjectOrderStoreDoesNotOverwriteExistingOrderWhenSavingEmptyIDs() {
+        let suiteName = "ProjectOrderTests-EmptySave-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Expected isolated user defaults suite")
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let store = ProjectOrderStore(userDefaults: defaults)
+        let profileID = UUID()
+
+        store.save(["project-a", "project-b"], for: profileID)
+        store.save([], for: profileID)
+
+        XCTAssertEqual(store.load(for: profileID), ["project-a", "project-b"])
+    }
+
+    func testStoredProjectReferencesPreferNormalizedWorktreeIdentity() {
+        let projects = [
+            makeProject(id: "kodanto-a", worktree: "/tmp/kodanto", updatedAt: 10),
+            makeProject(id: "kodanto-b", worktree: "/tmp/kodanto/.", updatedAt: 30),
+            makeProject(id: "notes", worktree: "/tmp/notes", updatedAt: 20)
+        ]
+
+        XCTAssertEqual(
+            ProjectOrderResolver.storedProjectReferences(for: projects),
+            ["worktree:/tmp/kodanto", "worktree:/tmp/notes"]
+        )
+    }
+
     func testResolverSanitizesExistingDuplicateProjectsUsingStoredOrder() {
         let projects = [
             makeProject(id: "alpha", updatedAt: 40),
@@ -156,6 +187,59 @@ final class ProjectOrderTests: XCTestCase {
         let ordered = ProjectOrderResolver.orderedProjects(projects, storedIDs: ["kodanto-a", "notes"])
 
         XCTAssertEqual(ordered.map(\.id), ["kodanto-a", "notes"])
+    }
+
+    func testResolverPreservesStoredOrderAcrossRebuiltProjectIDs() {
+        let originalProjects = [
+            makeProject(id: "income-old", worktree: "/tmp/income-categoriser", updatedAt: 20),
+            makeProject(id: "kodanto-old", worktree: "/tmp/kodanto", updatedAt: 30),
+            makeProject(id: "notes-old", worktree: "/tmp/notes", updatedAt: 10)
+        ]
+        let storedReferences = ProjectOrderResolver.storedProjectReferences(for: [
+            originalProjects[1],
+            originalProjects[0],
+            originalProjects[2]
+        ])
+        let rebuiltProjects = [
+            makeProject(id: "income-new", worktree: "/tmp/income-categoriser/.", updatedAt: 50),
+            makeProject(id: "kodanto-new", worktree: "/tmp/kodanto", updatedAt: 40),
+            makeProject(id: "notes-new", worktree: "/tmp/notes", updatedAt: 60)
+        ]
+
+        let ordered = ProjectOrderResolver.orderedProjects(rebuiltProjects, storedIDs: storedReferences)
+
+        XCTAssertEqual(ordered.map(\.id), ["kodanto-new", "income-new", "notes-new"])
+    }
+
+    func testProjectOrderStoreSupportsWorktreeReferencesAcrossRestart() {
+        let suiteName = "ProjectOrderTests-Restart-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            return XCTFail("Expected isolated user defaults suite")
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let profileID = UUID()
+        let originalOrder = [
+            makeProject(id: "kodanto-old", worktree: "/tmp/kodanto", updatedAt: 20),
+            makeProject(id: "income-old", worktree: "/tmp/income-categoriser", updatedAt: 10)
+        ]
+
+        ProjectOrderStore(userDefaults: defaults).save(
+            ProjectOrderResolver.storedProjectReferences(for: originalOrder),
+            for: profileID
+        )
+
+        let reloadedStore = ProjectOrderStore(userDefaults: defaults)
+        let rebuiltProjects = [
+            makeProject(id: "income-new", worktree: "/tmp/income-categoriser/.", updatedAt: 50),
+            makeProject(id: "kodanto-new", worktree: "/tmp/kodanto", updatedAt: 60)
+        ]
+
+        let ordered = ProjectOrderResolver.orderedProjects(rebuiltProjects, storedIDs: reloadedStore.load(for: profileID))
+
+        XCTAssertEqual(ordered.map(\.id), ["kodanto-new", "income-new"])
     }
 
     func testDeduplicatedProjectsKeepsOriginalRelativeOrderWhenReplacingDuplicateIdentity() {
