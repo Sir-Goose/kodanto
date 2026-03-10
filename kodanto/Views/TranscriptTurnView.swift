@@ -335,13 +335,16 @@ private struct ToolPartView: View {
             },
             content: {
                 if let transcript = tool.shellTranscript, !transcript.isEmpty {
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(transcript, forType: .string)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Spacer(minLength: 0)
+                            Button("Copy") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(transcript, forType: .string)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption.weight(.medium))
                         }
-                        .buttonStyle(.plain)
-                        .font(.caption.weight(.medium))
 
                         ShellTranscriptBlock(
                             tool: tool,
@@ -845,12 +848,14 @@ private struct MonospaceBlock: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
-            Text(text)
+            Text(verbatim: text)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: true, vertical: true)
                 .padding(10)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
@@ -863,12 +868,14 @@ private struct ShellTranscriptBlock: View {
         VStack(alignment: .leading, spacing: 8) {
             if let transcript = displayedTranscript {
                 ScrollView([.horizontal, .vertical], showsIndicators: true) {
-                    Text(transcript)
+                    Text(verbatim: transcript)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: true, vertical: true)
                         .padding(10)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(maxHeight: maxHeight)
                 .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }

@@ -286,7 +286,8 @@ private struct MarkdownBlockView: View {
                     Text(verbatim: code)
                         .font(.system(.body, design: .monospaced))
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: true, vertical: true)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
