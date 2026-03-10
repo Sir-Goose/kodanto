@@ -77,15 +77,16 @@ final class KodantoAppModel {
     var loadingSessionDirectories: Set<String> = []
 
     private let sidecar = SidecarProcess()
-    private let storage = ServerProfileStore()
-    private let modelSelectionStore = ModelSelectionStore()
-    private let modelVariantSelectionStore = ModelVariantSelectionStore()
-    private let permissionAutoAcceptStore = PermissionAutoAcceptStore()
-    private let projectOrderStore = ProjectOrderStore()
+    private let storage: ServerProfileStore
+    private let modelSelectionStore: ModelSelectionStore
+    private let modelVariantSelectionStore: ModelVariantSelectionStore
+    private let permissionAutoAcceptStore: PermissionAutoAcceptStore
+    private let projectOrderStore: ProjectOrderStore
     private var globalEventTask: Task<Void, Never>?
     private var heartbeatWatchdogTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
     private var autoRespondingPermissionIDs: Set<String> = []
+    private var permissionAutoAcceptValues: [String: Bool]
     private var liveSync = LiveSyncTracker()
     private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
     private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
@@ -95,7 +96,13 @@ final class KodantoAppModel {
 
     private let reconnectDelay: Duration = .milliseconds(250)
 
-    init() {
+    init(userDefaults: UserDefaults = .standard) {
+        storage = ServerProfileStore(userDefaults: userDefaults)
+        modelSelectionStore = ModelSelectionStore(userDefaults: userDefaults)
+        modelVariantSelectionStore = ModelVariantSelectionStore(userDefaults: userDefaults)
+        permissionAutoAcceptStore = PermissionAutoAcceptStore(userDefaults: userDefaults)
+        projectOrderStore = ProjectOrderStore(userDefaults: userDefaults)
+        permissionAutoAcceptValues = permissionAutoAcceptStore.load()
         profiles = storage.load()
         if profiles.isEmpty {
             let local = Self.makeLocalProfile()
@@ -144,7 +151,7 @@ final class KodantoAppModel {
 
     var isPermissionAutoAcceptEnabled: Bool {
         guard let key = selectedPermissionAutoAcceptKey else { return false }
-        return permissionAutoAcceptStore.load()[key] ?? false
+        return permissionAutoAcceptValues[key] ?? false
     }
 
     var canTogglePermissionAutoAccept: Bool {
@@ -556,9 +563,8 @@ final class KodantoAppModel {
 
     func setPermissionAutoAccept(_ enabled: Bool) {
         guard let key = selectedPermissionAutoAcceptKey else { return }
-        var values = permissionAutoAcceptStore.load()
-        values[key] = enabled
-        permissionAutoAcceptStore.save(values)
+        permissionAutoAcceptValues[key] = enabled
+        permissionAutoAcceptStore.save(permissionAutoAcceptValues)
 
         if enabled {
             autoRespondToPendingPermissionsIfNeeded()
@@ -1351,20 +1357,30 @@ private extension KodantoAppModel.ConnectionState {
 
 private struct ServerProfileStore {
     private let key = "kodanto.serverProfiles"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
 
     func load() -> [ServerProfile] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+        guard let data = userDefaults.data(forKey: key) else { return [] }
         return (try? JSONDecoder().decode([ServerProfile].self, from: data)) ?? []
     }
 
     func save(_ profiles: [ServerProfile]) {
         guard let data = try? JSONEncoder().encode(profiles) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        userDefaults.set(data, forKey: key)
     }
 }
 
 private struct ModelSelectionStore {
     private let key = "kodanto.selectedModelByProfile"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
 
     func load(for profileID: UUID) -> String? {
         values()[profileID.uuidString]
@@ -1373,22 +1389,27 @@ private struct ModelSelectionStore {
     func save(_ modelID: String, for profileID: UUID) {
         var updated = values()
         updated[profileID.uuidString] = modelID
-        UserDefaults.standard.set(updated, forKey: key)
+        userDefaults.set(updated, forKey: key)
     }
 
     func remove(for profileID: UUID) {
         var updated = values()
         updated.removeValue(forKey: profileID.uuidString)
-        UserDefaults.standard.set(updated, forKey: key)
+        userDefaults.set(updated, forKey: key)
     }
 
     private func values() -> [String: String] {
-        UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+        userDefaults.dictionary(forKey: key) as? [String: String] ?? [:]
     }
 }
 
 private struct ModelVariantSelectionStore {
     private let key = "kodanto.selectedModelVariantByProfile"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
 
     func load(for profileID: UUID, modelID: String) -> String? {
         values()[profileID.uuidString]?[modelID]
@@ -1399,7 +1420,7 @@ private struct ModelVariantSelectionStore {
         var profileValues = updated[profileID.uuidString] ?? [:]
         profileValues[modelID] = variant
         updated[profileID.uuidString] = profileValues
-        UserDefaults.standard.set(updated, forKey: key)
+        userDefaults.set(updated, forKey: key)
     }
 
     func remove(for profileID: UUID, modelID: String) {
@@ -1407,29 +1428,34 @@ private struct ModelVariantSelectionStore {
         var profileValues = updated[profileID.uuidString] ?? [:]
         profileValues.removeValue(forKey: modelID)
         updated[profileID.uuidString] = profileValues.isEmpty ? nil : profileValues
-        UserDefaults.standard.set(updated, forKey: key)
+        userDefaults.set(updated, forKey: key)
     }
 
     func remove(for profileID: UUID) {
         var updated = values()
         updated.removeValue(forKey: profileID.uuidString)
-        UserDefaults.standard.set(updated, forKey: key)
+        userDefaults.set(updated, forKey: key)
     }
 
     private func values() -> [String: [String: String]] {
-        UserDefaults.standard.dictionary(forKey: key) as? [String: [String: String]] ?? [:]
+        userDefaults.dictionary(forKey: key) as? [String: [String: String]] ?? [:]
     }
 }
 
 private struct PermissionAutoAcceptStore {
     private let key = "kodanto.permissionAutoAccept"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
 
     func load() -> [String: Bool] {
-        UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+        userDefaults.dictionary(forKey: key) as? [String: Bool] ?? [:]
     }
 
     func save(_ values: [String: Bool]) {
-        UserDefaults.standard.set(values, forKey: key)
+        userDefaults.set(values, forKey: key)
     }
 
     static func makeKey(sessionID: String, directory: String) -> String {

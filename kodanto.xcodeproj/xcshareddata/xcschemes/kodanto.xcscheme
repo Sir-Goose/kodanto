@@ -20,20 +20,6 @@
                ReferencedContainer = "container:kodanto.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "7F1A10062F5E000100000001"
-               BuildableName = "kodantoTests.xctest"
-               BlueprintName = "kodantoTests"
-               ReferencedContainer = "container:kodanto.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction
@@ -50,18 +36,6 @@
             ReferencedContainer = "container:kodanto.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
-      <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "7F1A10062F5E000100000001"
-               BuildableName = "kodantoTests.xctest"
-               BlueprintName = "kodantoTests"
-               ReferencedContainer = "container:kodanto.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-      </Testables>
    </TestAction>
    <LaunchAction
       buildConfiguration = "Debug"
