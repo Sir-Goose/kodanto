@@ -38,20 +38,11 @@ struct MainView: View {
 
     private static let composerOuterPadding: CGFloat = 16
     private static let composerInnerPadding: CGFloat = 14
-    private static let composerButtonSize: CGFloat = 34
     private static let composerContentGap: CGFloat = 12
     private static let collapsedHeaderLeadingInset: CGFloat = 124
 
     private var transcriptTurns: [TranscriptTurn] {
         TranscriptTurn.build(from: model.selectedSessionMessages)
-    }
-
-    private var composerReservedHeight: CGFloat {
-        max(max(promptEditorHeight, promptMinimumHeight), Self.composerButtonSize)
-        + Self.composerModelRowHeight
-        + (Self.composerInnerPadding * 2)
-        + Self.composerOuterPadding
-        + Self.composerContentGap
     }
 
     var body: some View {
@@ -450,7 +441,7 @@ struct MainView: View {
                 if let session = model.selectedSession {
                     header(for: session)
                     Divider()
-                    ZStack(alignment: .bottom) {
+                    VStack(spacing: 0) {
                         ScrollViewReader { proxy in
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 18) {
@@ -467,19 +458,6 @@ struct MainView: View {
                                             disclosureStates: $transcriptDisclosureStates,
                                             patchDisclosureStates: $patchDisclosureStates
                                         )
-                                    }
-
-                                    if !model.sessionTodos.isEmpty {
-                                        InspectorSection(title: "Todos") {
-                                            ForEach(Array(model.sessionTodos.enumerated()), id: \.offset) { _, todo in
-                                                HStack {
-                                                    Text(todo.content)
-                                                    Spacer()
-                                                    Text(todo.status)
-                                                        .foregroundStyle(.secondary)
-                                                }
-                                            }
-                                        }
                                     }
 
                                     if !model.permissions.isEmpty {
@@ -529,9 +507,6 @@ struct MainView: View {
                                     }
 
                                     Color.clear
-                                        .frame(height: composerReservedHeight)
-
-                                    Color.clear
                                         .frame(height: 1)
                                         .id(transcriptScrollTarget)
                                 }
@@ -570,11 +545,10 @@ struct MainView: View {
                             }
                         }
 
-                        composer(maxHeight: composerMaxHeight)
+                        bottomPanel(maxHeight: composerMaxHeight)
                             .frame(maxWidth: Self.composerMaxWidth)
                             .padding(.horizontal, Self.composerOuterPadding)
                             .padding(.bottom, Self.composerOuterPadding)
-                            .zIndex(1)
                     }
                 } else {
                     ContentUnavailableView("Select a session", systemImage: "bubble.left.and.text.bubble.right")
@@ -695,6 +669,15 @@ struct MainView: View {
                 .stroke(Color.secondary.opacity(0.18))
         )
         .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
+    }
+
+    private func bottomPanel(maxHeight: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: Self.composerContentGap) {
+            SessionTodoDockView(todos: model.sessionTodos)
+                .id(model.selectedSessionID ?? "session-todo-dock")
+
+            composer(maxHeight: maxHeight)
+        }
     }
 
     private func header(for session: OpenCodeSession) -> some View {
@@ -833,13 +816,7 @@ struct MainView: View {
     }
 
     private func scrollTranscriptToBottom(using proxy: ScrollViewProxy) {
-        let action = {
-            proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
-        }
-
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.18), action)
-        }
+        jumpTranscriptToBottom(using: proxy)
     }
 }
 
@@ -1190,6 +1167,16 @@ private struct SessionSidebarRow: View {
                 .font(.callout.weight(isSelected ? .semibold : .regular))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+                .layoutPriority(1)
+
+            TimelineView(.periodic(from: .now, by: 60)) { context in
+                Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
 
             Spacer(minLength: 0)
         }
