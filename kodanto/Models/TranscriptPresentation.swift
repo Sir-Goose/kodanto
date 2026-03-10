@@ -250,6 +250,78 @@ enum TranscriptPathFormatter {
     }
 }
 
+private let shellPreviewOutputLineLimit = 12
+
+private struct ShellTranscriptPresentation {
+    let commandLine: String?
+    let output: String?
+
+    init(command: String?, output: String?) {
+        if let command, !command.isEmpty {
+            commandLine = "$ \(command)"
+        } else {
+            commandLine = nil
+        }
+
+        if let output {
+            let trimmed = output.trimmingCharacters(in: .newlines)
+            self.output = trimmed.isEmpty ? nil : trimmed
+        } else {
+            self.output = nil
+        }
+    }
+
+    var outputLines: [String] {
+        guard let output else { return [] }
+        return output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    }
+
+    var outputLineCount: Int {
+        outputLines.count
+    }
+
+    var hiddenOutputLineCount: Int {
+        max(outputLineCount - shellPreviewOutputLineLimit, 0)
+    }
+
+    var hasHiddenOutput: Bool {
+        hiddenOutputLineCount > 0
+    }
+
+    var previewOutput: String? {
+        guard let output else { return nil }
+        guard hasHiddenOutput else { return output }
+        return Array(outputLines.prefix(shellPreviewOutputLineLimit)).joined(separator: "\n")
+    }
+
+    var fullTranscript: String? {
+        formattedTranscript(output: output)
+    }
+
+    var previewTranscript: String? {
+        formattedTranscript(output: previewOutput)
+    }
+
+    var lineCountBadge: String? {
+        guard outputLineCount > 0 else { return nil }
+        let noun = outputLineCount == 1 ? "line" : "lines"
+        return "\(outputLineCount) \(noun)"
+    }
+
+    private func formattedTranscript(output: String?) -> String? {
+        switch (commandLine, output) {
+        case let (commandLine?, output?) where !output.isEmpty:
+            return "\(commandLine)\n\n\(output)"
+        case let (commandLine?, _):
+            return commandLine
+        case let (_, output?) where !output.isEmpty:
+            return output
+        default:
+            return nil
+        }
+    }
+}
+
 extension OpenCodePart.Tool {
     var isPendingOrRunning: Bool {
         state.status == "pending" || state.status == "running"
@@ -338,13 +410,32 @@ extension OpenCodePart.Tool {
         metadataValues["output"]?.stringValue ?? state.output
     }
 
+    private var shellPresentation: ShellTranscriptPresentation {
+        ShellTranscriptPresentation(command: command, output: shellOutput)
+    }
+
     var shellTranscript: String? {
-        guard let command, !command.isEmpty else { return shellOutput }
-        let output = shellOutput?.trimmingCharacters(in: .newlines)
-        if let output, !output.isEmpty {
-            return "$ \(command)\n\n\(output)"
-        }
-        return "$ \(command)"
+        shellPresentation.fullTranscript
+    }
+
+    var shellPreviewTranscript: String? {
+        shellPresentation.previewTranscript
+    }
+
+    var shellOutputLineCount: Int {
+        shellPresentation.outputLineCount
+    }
+
+    var shellHiddenOutputLineCount: Int {
+        shellPresentation.hiddenOutputLineCount
+    }
+
+    var shellHasHiddenOutput: Bool {
+        shellPresentation.hasHiddenOutput
+    }
+
+    var shellLineCountBadge: String? {
+        shellPresentation.lineCountBadge
     }
 
     var agentName: String? {

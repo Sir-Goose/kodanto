@@ -8,6 +8,7 @@ struct TranscriptTurnView: View {
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Binding var disclosureStates: [String: Bool]
     @Binding var patchDisclosureStates: [String: Bool]
+    @Binding var shellOutputDisclosureStates: [String: Bool]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -31,7 +32,8 @@ struct TranscriptTurnView: View {
                             resolveTaskTarget: resolveTaskTarget,
                             navigateToSession: navigateToSession,
                             disclosureStates: $disclosureStates,
-                            patchDisclosureStates: $patchDisclosureStates
+                            patchDisclosureStates: $patchDisclosureStates,
+                            shellOutputDisclosureStates: $shellOutputDisclosureStates
                         )
                     }
                 }
@@ -58,7 +60,8 @@ private struct UserPromptCard: View {
                         resolveTaskTarget: { _ in nil },
                         navigateToSession: { _ in },
                         disclosureStates: .constant([:]),
-                        patchDisclosureStates: .constant([:])
+                        patchDisclosureStates: .constant([:]),
+                        shellOutputDisclosureStates: .constant([:])
                     )
                 }
             }
@@ -83,6 +86,7 @@ private struct AssistantPartGroupView: View {
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Binding var disclosureStates: [String: Bool]
     @Binding var patchDisclosureStates: [String: Bool]
+    @Binding var shellOutputDisclosureStates: [String: Bool]
 
     var body: some View {
         switch group {
@@ -93,7 +97,8 @@ private struct AssistantPartGroupView: View {
                 resolveTaskTarget: resolveTaskTarget,
                 navigateToSession: navigateToSession,
                 disclosureStates: $disclosureStates,
-                patchDisclosureStates: $patchDisclosureStates
+                patchDisclosureStates: $patchDisclosureStates,
+                shellOutputDisclosureStates: $shellOutputDisclosureStates
             )
         case .context(let id, let tools):
             ContextToolGroupView(
@@ -120,6 +125,7 @@ private struct TranscriptPartView: View {
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Binding var disclosureStates: [String: Bool]
     @Binding var patchDisclosureStates: [String: Bool]
+    @Binding var shellOutputDisclosureStates: [String: Bool]
 
     var body: some View {
         switch part {
@@ -138,7 +144,8 @@ private struct TranscriptPartView: View {
                 resolveTaskTarget: resolveTaskTarget,
                 navigateToSession: navigateToSession,
                 isExpanded: binding(for: tool.id, defaultOpen: tool.defaultOpen),
-                patchDisclosureStates: $patchDisclosureStates
+                patchDisclosureStates: $patchDisclosureStates,
+                shellOutputDisclosureStates: $shellOutputDisclosureStates
             )
         default:
             Text(part.summary)
@@ -275,6 +282,7 @@ private struct ToolPartView: View {
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Binding var isExpanded: Bool
     @Binding var patchDisclosureStates: [String: Bool]
+    @Binding var shellOutputDisclosureStates: [String: Bool]
 
     var body: some View {
         if tool.isError, let error = tool.state.error, !error.isEmpty {
@@ -333,7 +341,10 @@ private struct ToolPartView: View {
                         .buttonStyle(.plain)
                         .font(.caption.weight(.medium))
 
-                        MonospaceBlock(text: transcript)
+                        ShellTranscriptBlock(
+                            tool: tool,
+                            isExpanded: shellOutputBinding(for: tool.id)
+                        )
                     }
                 }
             }
@@ -650,6 +661,13 @@ private struct ToolPartView: View {
             set: { patchDisclosureStates[key] = $0 }
         )
     }
+
+    private func shellOutputBinding(for key: String) -> Binding<Bool> {
+        Binding(
+            get: { shellOutputDisclosureStates[key] ?? false },
+            set: { shellOutputDisclosureStates[key] = $0 }
+        )
+    }
 }
 
 private enum ToolSubtitle {
@@ -831,6 +849,56 @@ private struct MonospaceBlock: View {
                 .padding(10)
         }
         .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private struct ShellTranscriptBlock: View {
+    let tool: OpenCodePart.Tool
+    @Binding var isExpanded: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let transcript = displayedTranscript {
+                ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                    Text(transcript)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                }
+                .frame(maxHeight: maxHeight)
+                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            if tool.shellHasHiddenOutput, !tool.isPendingOrRunning {
+                Button(isExpanded ? "Show less" : expandLabel) {
+                    isExpanded.toggle()
+                }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.medium))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var displayedTranscript: String? {
+        if isExpanded || tool.isPendingOrRunning {
+            return tool.shellTranscript
+        }
+        return tool.shellPreviewTranscript
+    }
+
+    private var expandLabel: String {
+        let lineCount = tool.shellOutputLineCount
+        let noun = lineCount == 1 ? "line" : "lines"
+        return "Show all \(lineCount) \(noun)"
+    }
+
+    private var maxHeight: CGFloat? {
+        if isExpanded || tool.isPendingOrRunning {
+            return 360
+        }
+        return 220
     }
 }
 
