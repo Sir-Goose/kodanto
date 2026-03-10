@@ -149,13 +149,6 @@ struct MainView: View {
                     draggedProjectID = project.id
                     return NSItemProvider(object: NSString(string: project.id))
                 }
-                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
-                    targetProjectID: project.id,
-                    surface: .rowSurface,
-                    model: model,
-                    draggedProjectID: $draggedProjectID,
-                    dropTarget: $projectDropTarget
-                ))
 
                 if model.isLoadingSessions(for: project) {
                     ProgressView()
@@ -173,6 +166,40 @@ struct MainView: View {
                 .buttonStyle(.plain)
                 .help("New Session")
                 .disabled(model.selectedProfile == nil)
+            }
+            .contentShape(Rectangle())
+            .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
+                targetProjectID: project.id,
+                surface: .rowSurface,
+                model: model,
+                draggedProjectID: $draggedProjectID,
+                dropTarget: $projectDropTarget
+            ))
+            .overlay(alignment: .top) {
+                Color.clear
+                    .frame(height: ProjectDropPlacementResolver.gutterHitHeight)
+                    .offset(y: -(ProjectDropPlacementResolver.gutterHitHeight / 2))
+                    .contentShape(Rectangle())
+                    .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
+                        targetProjectID: project.id,
+                        surface: .topGutter,
+                        model: model,
+                        draggedProjectID: $draggedProjectID,
+                        dropTarget: $projectDropTarget
+                    ))
+            }
+            .overlay(alignment: .bottom) {
+                Color.clear
+                    .frame(height: ProjectDropPlacementResolver.gutterHitHeight)
+                    .offset(y: ProjectDropPlacementResolver.gutterHitHeight / 2)
+                    .contentShape(Rectangle())
+                    .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
+                        targetProjectID: project.id,
+                        surface: .bottomGutter,
+                        model: model,
+                        draggedProjectID: $draggedProjectID,
+                        dropTarget: $projectDropTarget
+                    ))
             }
 
             if isExpanded {
@@ -218,17 +245,6 @@ struct MainView: View {
                     dropTarget: $projectDropTarget
                 ))
             }
-
-            Color.clear
-                .frame(height: ProjectDropPlacementResolver.gutterHeight)
-                .contentShape(Rectangle())
-                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
-                    targetProjectID: project.id,
-                    surface: .bottomGutter,
-                    model: model,
-                    draggedProjectID: $draggedProjectID,
-                    dropTarget: $projectDropTarget
-                ))
         }
     }
 
@@ -761,7 +777,7 @@ enum ProjectDropSurface {
 }
 
 enum ProjectDropPlacementResolver {
-    static let gutterHeight: CGFloat = 3
+    static let gutterHitHeight: CGFloat = 8
     static let rowHeight: CGFloat = 34
 
     static func placement(
