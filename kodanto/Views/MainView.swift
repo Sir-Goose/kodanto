@@ -1641,6 +1641,7 @@ private struct ModelPickerRow: View {
 private struct ThinkingEffortPicker: View {
     @Bindable var model: KodantoAppModel
     @State private var isHovered = false
+    @State private var isShowingPicker = false
 
     private var selectionLabel: String {
         model.selectedPromptVariant ?? "Default"
@@ -1651,27 +1652,10 @@ private struct ThinkingEffortPicker: View {
     }
 
     var body: some View {
-        Menu {
-            Button {
-                model.selectModelVariant(nil)
-            } label: {
-                optionLabel("Default", isSelected: model.selectedPromptVariant == nil)
-            }
-
-            ForEach(model.selectedModelVariants, id: \.self) { variant in
-                Button {
-                    model.selectModelVariant(variant)
-                } label: {
-                    optionLabel(variant, isSelected: model.selectedPromptVariant == variant)
-                }
-            }
+        Button {
+            isShowingPicker.toggle()
         } label: {
             HStack(spacing: 8) {
-                Text("Thinking")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-
                 Text(selectionLabel)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.primary)
@@ -1687,7 +1671,6 @@ private struct ThinkingEffortPicker: View {
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .animation(.easeInOut(duration: 0.12), value: isHovered)
         }
-        .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         .fixedSize()
         .disabled(!hasVariants)
@@ -1695,6 +1678,66 @@ private struct ThinkingEffortPicker: View {
         .accessibilityIdentifier("thinking-effort-picker")
         .onHover { hovering in
             isHovered = hovering
+        }
+        .popover(isPresented: $isShowingPicker, arrowEdge: .bottom) {
+            ThinkingEffortPickerPopover(
+                variants: model.selectedModelVariants,
+                selectedVariant: model.selectedPromptVariant
+            ) { variant in
+                model.selectModelVariant(variant)
+                isShowingPicker = false
+            }
+        }
+    }
+
+    private struct ThinkingEffortPickerPopover: View {
+        let variants: [String]
+        let selectedVariant: String?
+        let onSelect: (String?) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    onSelect(nil)
+                } label: {
+                    optionRow("Default", isSelected: selectedVariant == nil)
+                }
+                .buttonStyle(.plain)
+
+                ForEach(variants, id: \.self) { variant in
+                    Button {
+                        onSelect(variant)
+                    } label: {
+                        optionRow(variant, isSelected: selectedVariant == variant)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(10)
+            .frame(width: 180, alignment: .leading)
+        }
+
+        @ViewBuilder
+        private func optionRow(_ title: String, isSelected: Bool) -> some View {
+            HStack(spacing: 10) {
+                Text(title)
+                    .font(.callout.weight(isSelected ? .medium : .regular))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(Color.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
     }
 
