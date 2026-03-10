@@ -15,6 +15,7 @@ struct MainView: View {
     @State private var projectDropTarget: ProjectDropTarget?
     @State private var transcriptDisclosureStates: [String: Bool] = [:]
     @State private var patchDisclosureStates: [String: Bool] = [:]
+    @State private var shellOutputDisclosureStates: [String: Bool] = [:]
     @State private var sidebarFocusedItem: SidebarFocusItem?
     @FocusState private var isSidebarFocused: Bool
 
@@ -456,7 +457,8 @@ struct MainView: View {
                                                 model.selectSession(target.sessionID, in: target.projectID)
                                             },
                                             disclosureStates: $transcriptDisclosureStates,
-                                            patchDisclosureStates: $patchDisclosureStates
+                                            patchDisclosureStates: $patchDisclosureStates,
+                                            shellOutputDisclosureStates: $shellOutputDisclosureStates
                                         )
                                     }
 
@@ -524,6 +526,7 @@ struct MainView: View {
                                 pendingInitialBottomSessionID = sessionID
                                 transcriptDisclosureStates = [:]
                                 patchDisclosureStates = [:]
+                                shellOutputDisclosureStates = [:]
                                 jumpTranscriptToBottom(using: proxy)
                             }
                             .onChange(of: model.selectedSessionTranscriptRevision) { _, _ in

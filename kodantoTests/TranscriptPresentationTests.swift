@@ -197,7 +197,57 @@ final class TranscriptPresentationTests: XCTestCase {
         XCTAssertEqual(tool.command, "git status")
         XCTAssertEqual(tool.shellDescription, "Show repo status")
         XCTAssertEqual(tool.shellTranscript, "$ git status\n\nOn branch main")
+        XCTAssertEqual(tool.shellPreviewTranscript, "$ git status\n\nOn branch main")
+        XCTAssertEqual(tool.shellOutputLineCount, 1)
+        XCTAssertEqual(tool.shellHiddenOutputLineCount, 0)
+        XCTAssertFalse(tool.shellHasHiddenOutput)
+        XCTAssertEqual(tool.shellLineCountBadge, "1 line")
         XCTAssertTrue(tool.defaultOpen)
+    }
+
+    func testBashToolPreviewTruncatesLongOutputToPreviewLimit() {
+        let outputLines = (1...14).map { "line \($0)" }
+        let output = outputLines.joined(separator: "\n")
+        let preview = Array(outputLines.prefix(12)).joined(separator: "\n")
+        let tool = toolValue(
+            id: "tool-1",
+            messageID: "assistant-1",
+            tool: "bash",
+            status: "completed",
+            input: [
+                "command": .string("python script.py")
+            ],
+            output: output
+        )
+
+        XCTAssertEqual(tool.shellTranscript, "$ python script.py\n\n\(output)")
+        XCTAssertEqual(tool.shellPreviewTranscript, "$ python script.py\n\n\(preview)")
+        XCTAssertEqual(tool.shellOutputLineCount, 14)
+        XCTAssertEqual(tool.shellHiddenOutputLineCount, 2)
+        XCTAssertTrue(tool.shellHasHiddenOutput)
+        XCTAssertEqual(tool.shellLineCountBadge, "14 lines")
+    }
+
+    func testBashToolPreviewDoesNotTruncateAtPreviewThreshold() {
+        let outputLines = (1...12).map { "line \($0)" }
+        let output = outputLines.joined(separator: "\n")
+        let tool = toolValue(
+            id: "tool-1",
+            messageID: "assistant-1",
+            tool: "bash",
+            status: "completed",
+            input: [
+                "command": .string("npm test")
+            ],
+            output: output
+        )
+
+        XCTAssertEqual(tool.shellTranscript, "$ npm test\n\n\(output)")
+        XCTAssertEqual(tool.shellPreviewTranscript, "$ npm test\n\n\(output)")
+        XCTAssertEqual(tool.shellOutputLineCount, 12)
+        XCTAssertEqual(tool.shellHiddenOutputLineCount, 0)
+        XCTAssertFalse(tool.shellHasHiddenOutput)
+        XCTAssertEqual(tool.shellLineCountBadge, "12 lines")
     }
 
     func testReadToolHelpersDecodeLoadedFiles() {
