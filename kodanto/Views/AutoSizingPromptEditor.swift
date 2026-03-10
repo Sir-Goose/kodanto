@@ -218,13 +218,25 @@ final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
     weak var coordinator: AutoSizingPromptEditor.Coordinator?
 
+    static func shouldSubmit(for keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {
+        guard keyCode == 36 || keyCode == 76 else {
+            return false
+        }
+
+        let normalizedModifiers = modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting(.numericPad)
+
+        return normalizedModifiers.isEmpty || normalizedModifiers == [.command]
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         coordinator?.scheduleHeightRecalculation()
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 36, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == [.command] {
+        if !hasMarkedText(), Self.shouldSubmit(for: event.keyCode, modifierFlags: event.modifierFlags) {
             onSubmit?()
             return
         }

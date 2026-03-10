@@ -158,7 +158,6 @@ struct MainView: View {
                 ProjectSidebarRow(
                     project: project,
                     isExpanded: isExpanded,
-                    isActive: model.selectedProjectID == project.id,
                     isFocused: isFocused,
                     dropPlacement: dropPlacement(for: project.id)
                 )
@@ -658,7 +657,6 @@ struct MainView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .keyboardShortcut(.return, modifiers: [.command])
             .disabled(!model.canSendPrompt)
             .help("Send")
         }
@@ -870,7 +868,6 @@ private struct DiagnosticsSheet: View {
 private struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
-    let isActive: Bool
     let isFocused: Bool
     let dropPlacement: ProjectDropPlacement?
     @State private var isHovered = false
@@ -888,7 +885,7 @@ private struct ProjectSidebarRow: View {
                 .padding(.top, 1)
 
             Text(project.displayName)
-                .font(.body.weight(isActive ? .semibold : .regular))
+                .font(.body)
                 .foregroundStyle(.primary)
 
             Spacer(minLength: 0)
@@ -913,9 +910,6 @@ private struct ProjectSidebarRow: View {
     }
 
     private var backgroundColor: Color {
-        if isActive {
-            return Color.accentColor.opacity(0.12)
-        }
         if isFocused {
             return Color.secondary.opacity(0.14)
         }
