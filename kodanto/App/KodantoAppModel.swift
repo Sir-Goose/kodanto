@@ -245,6 +245,7 @@ final class KodantoAppModel {
 
         var reorderedProjects = projects
         reorderedProjects.moveItems(fromOffsets: source, toOffset: destination)
+        reorderedProjects = ProjectOrderResolver.deduplicatedProjects(reorderedProjects)
 
         guard reorderedProjects != projects else { return }
 
@@ -267,6 +268,16 @@ final class KodantoAppModel {
         guard reorderedProjects != projects else { return }
 
         projects = reorderedProjects
+        persistProjectOrder()
+    }
+
+    func sanitizeProjects() {
+        let sanitizedProjects = resolvedProjectOrder(for: projects)
+
+        if sanitizedProjects != projects {
+            projects = sanitizedProjects
+        }
+
         persistProjectOrder()
     }
 
@@ -899,7 +910,7 @@ final class KodantoAppModel {
 
     private func persistProjectOrder() {
         guard let selectedProfileID else { return }
-        projectOrderStore.save(projects.map(\.id), for: selectedProfileID)
+        projectOrderStore.save(ProjectOrderResolver.deduplicatedProjectIDs(projects.map(\.id)), for: selectedProfileID)
     }
 
     private func applySelectedProjectCache() {
@@ -1105,7 +1116,7 @@ struct ProjectOrderStore {
 
     func save(_ projectIDs: [String], for profileID: UUID) {
         var updated = values()
-        updated[profileID.uuidString] = projectIDs
+        updated[profileID.uuidString] = ProjectOrderResolver.deduplicatedProjectIDs(projectIDs)
         userDefaults.set(updated, forKey: key)
     }
 
@@ -1126,8 +1137,18 @@ enum ProjectDropPlacement: Equatable {
 }
 
 enum ProjectOrderResolver {
+    static func deduplicatedProjectIDs(_ projectIDs: [String]) -> [String] {
+        var seenIDs: Set<String> = []
+        return projectIDs.filter { seenIDs.insert($0).inserted }
+    }
+
+    static func deduplicatedProjects(_ projects: [OpenCodeProject]) -> [OpenCodeProject] {
+        var seenIDs: Set<OpenCodeProject.ID> = []
+        return projects.filter { seenIDs.insert($0.id).inserted }
+    }
+
     static func orderedProjects(_ projects: [OpenCodeProject], storedIDs: [String]) -> [OpenCodeProject] {
-        let orderedByRecency = projects.sorted { lhs, rhs in
+        let orderedByRecency = deduplicatedProjects(projects).sorted { lhs, rhs in
             if lhs.time.updated != rhs.time.updated {
                 return lhs.time.updated > rhs.time.updated
             }
@@ -1136,7 +1157,7 @@ enum ProjectOrderResolver {
         }
         guard !storedIDs.isEmpty else { return orderedByRecency }
 
-        let storedIndexes = Dictionary(uniqueKeysWithValues: storedIDs.enumerated().map { ($1, $0) })
+        let storedIndexes = Dictionary(uniqueKeysWithValues: deduplicatedProjectIDs(storedIDs).enumerated().map { ($1, $0) })
 
         return orderedByRecency.sorted { lhs, rhs in
             let lhsStoredIndex = storedIndexes[lhs.id]
@@ -1165,12 +1186,13 @@ enum ProjectOrderResolver {
         relativeTo targetProjectID: OpenCodeProject.ID,
         placement: ProjectDropPlacement
     ) -> [OpenCodeProject] {
-        guard projects.count > 1 else { return projects }
-        guard movingProjectID != targetProjectID else { return projects }
-        guard let sourceIndex = projects.firstIndex(where: { $0.id == movingProjectID }) else { return projects }
-        guard let targetIndex = projects.firstIndex(where: { $0.id == targetProjectID }) else { return projects }
+        var reorderedProjects = deduplicatedProjects(projects)
 
-        var reorderedProjects = projects
+        guard reorderedProjects.count > 1 else { return reorderedProjects }
+        guard movingProjectID != targetProjectID else { return reorderedProjects }
+        guard let sourceIndex = reorderedProjects.firstIndex(where: { $0.id == movingProjectID }) else { return reorderedProjects }
+        guard let targetIndex = reorderedProjects.firstIndex(where: { $0.id == targetProjectID }) else { return reorderedProjects }
+
         let movedProject = reorderedProjects.remove(at: sourceIndex)
 
         var insertionIndex = targetIndex

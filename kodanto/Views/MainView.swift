@@ -72,6 +72,11 @@ struct MainView: View {
             guard let selectedProjectID = model.selectedProjectID else { return }
             expandedProjectIDs.insert(selectedProjectID)
         }
+        .onAppear {
+            model.sanitizeProjects()
+            draggedProjectID = nil
+            projectDropTarget = nil
+        }
     }
 
     private var sidebar: some View {
@@ -134,8 +139,7 @@ struct MainView: View {
                     project: project,
                     isExpanded: isExpanded,
                     isActive: model.selectedProjectID == project.id,
-                    dropPlacement: dropPlacement(for: project.id),
-                    isDragSource: draggedProjectID == project.id
+                    dropPlacement: dropPlacement(for: project.id)
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -209,12 +213,10 @@ struct MainView: View {
 
     private func toggleProjectExpansion(for project: OpenCodeProject) {
         let shouldExpand = !expandedProjectIDs.contains(project.id)
-        withAnimation(.easeInOut(duration: 0.16)) {
-            if shouldExpand {
-                expandedProjectIDs.insert(project.id)
-            } else {
-                expandedProjectIDs.remove(project.id)
-            }
+        if shouldExpand {
+            expandedProjectIDs.insert(project.id)
+        } else {
+            expandedProjectIDs.remove(project.id)
         }
 
         if shouldExpand {
@@ -667,7 +669,6 @@ private struct ProjectSidebarRow: View {
     let isExpanded: Bool
     let isActive: Bool
     let dropPlacement: ProjectDropPlacement?
-    let isDragSource: Bool
     @State private var isHovered = false
 
     var body: some View {
@@ -700,10 +701,8 @@ private struct ProjectSidebarRow: View {
                     .padding(.horizontal, 6)
             }
         }
-        .opacity(isDragSource ? 0.72 : 1)
         .animation(.easeInOut(duration: 0.12), value: isHovered)
         .animation(.easeInOut(duration: 0.12), value: dropPlacement)
-        .animation(.easeInOut(duration: 0.12), value: isDragSource)
         .onHover { hovering in
             isHovered = hovering
         }
@@ -747,7 +746,6 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
 
         if dropTarget != newTarget {
             dropTarget = newTarget
-            model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement)
         }
     }
 
@@ -761,13 +759,18 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
 
         if dropTarget != newTarget {
             dropTarget = newTarget
-            model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement)
         }
 
         return DropProposal(operation: .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {
+        guard let draggedProjectID, draggedProjectID != targetProjectID else {
+            clearDropState()
+            return false
+        }
+
+        model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement(for: info))
         clearDropState()
         return true
     }
@@ -775,6 +778,11 @@ private struct ProjectSidebarDropDelegate: DropDelegate {
     func dropExited(info: DropInfo) {
         guard dropTarget?.projectID == targetProjectID else { return }
         dropTarget = nil
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        guard let draggedProjectID else { return false }
+        return draggedProjectID != targetProjectID
     }
 
     private func placement(for info: DropInfo) -> ProjectDropPlacement {
