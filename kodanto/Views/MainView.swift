@@ -231,6 +231,7 @@ struct MainView: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.leading, 24)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }
@@ -1163,6 +1164,8 @@ private struct SessionSidebarRow: View {
                 .lineLimit(1)
                 .layoutPriority(1)
 
+            Spacer(minLength: 0)
+
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
                     .font(.caption)
@@ -1171,8 +1174,6 @@ private struct SessionSidebarRow: View {
                     .lineLimit(1)
                     .fixedSize()
             }
-
-            Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
