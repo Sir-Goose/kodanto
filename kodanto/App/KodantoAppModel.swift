@@ -61,6 +61,7 @@ final class KodantoAppModel {
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
     private let modelSelectionStore = ModelSelectionStore()
+    private let projectOrderStore = ProjectOrderStore()
     private var globalEventTask: Task<Void, Never>?
     private var heartbeatWatchdogTask: Task<Void, Never>?
     private var liveSync = LiveSyncTracker()
@@ -225,6 +226,7 @@ final class KodantoAppModel {
         guard profiles.count > 1 else { return }
         profiles.removeAll { $0.id == profile.id }
         modelSelectionStore.remove(for: profile.id)
+        projectOrderStore.remove(for: profile.id)
         if selectedProfileID == profile.id {
             selectedProfileID = profiles.first?.id
             selectedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
@@ -236,6 +238,36 @@ final class KodantoAppModel {
         selectedModelID = modelID
         guard let profileID = selectedProfileID else { return }
         modelSelectionStore.save(modelID, for: profileID)
+    }
+
+    func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int) {
+        guard projects.count > 1 else { return }
+
+        var reorderedProjects = projects
+        reorderedProjects.moveItems(fromOffsets: source, toOffset: destination)
+
+        guard reorderedProjects != projects else { return }
+
+        projects = reorderedProjects
+        persistProjectOrder()
+    }
+
+    func moveProject(
+        _ projectID: OpenCodeProject.ID,
+        relativeTo targetProjectID: OpenCodeProject.ID,
+        placement: ProjectDropPlacement
+    ) {
+        let reorderedProjects = ProjectOrderResolver.reorderedProjects(
+            projects,
+            movingProjectID: projectID,
+            relativeTo: targetProjectID,
+            placement: placement
+        )
+
+        guard reorderedProjects != projects else { return }
+
+        projects = reorderedProjects
+        persistProjectOrder()
     }
 
     func connect() {
@@ -429,10 +461,11 @@ final class KodantoAppModel {
         async let projectsTask = client.projects()
 
         let resolvedPathInfo = try await pathInfoTask
-        let loadedProjects = try await projectsTask.sorted { $0.time.updated > $1.time.updated }
+        let loadedProjects = resolvedProjectOrder(for: try await projectsTask)
 
         pathInfo = resolvedPathInfo
         projects = loadedProjects
+        persistProjectOrder()
 
         if scope.includesModelCatalog {
             do {
@@ -672,12 +705,16 @@ final class KodantoAppModel {
     }
 
     private func upsertProject(_ project: OpenCodeProject) {
-        if let index = projects.firstIndex(where: { $0.id == project.id }) {
-            projects[index] = project
+        var updatedProjects = projects
+
+        if let index = updatedProjects.firstIndex(where: { $0.id == project.id }) {
+            updatedProjects[index] = project
         } else {
-            projects.append(project)
-            projects.sort { $0.time.updated > $1.time.updated }
+            updatedProjects.append(project)
         }
+
+        projects = resolvedProjectOrder(for: updatedProjects)
+        persistProjectOrder()
     }
 
     private func upsertSession(_ session: OpenCodeSession, directory: String) {
@@ -853,6 +890,16 @@ final class KodantoAppModel {
 
     private func project(for projectID: OpenCodeProject.ID) -> OpenCodeProject? {
         projects.first(where: { $0.id == projectID })
+    }
+
+    private func resolvedProjectOrder(for projects: [OpenCodeProject]) -> [OpenCodeProject] {
+        let storedProjectIDs = selectedProfileID.map { projectOrderStore.load(for: $0) } ?? []
+        return ProjectOrderResolver.orderedProjects(projects, storedIDs: storedProjectIDs)
+    }
+
+    private func persistProjectOrder() {
+        guard let selectedProfileID else { return }
+        projectOrderStore.save(projects.map(\.id), for: selectedProfileID)
     }
 
     private func applySelectedProjectCache() {
@@ -1041,5 +1088,116 @@ private struct ModelSelectionStore {
 
     private func values() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
+}
+
+struct ProjectOrderStore {
+    private let key = "kodanto.projectOrderByProfile"
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
+    }
+
+    func load(for profileID: UUID) -> [String] {
+        values()[profileID.uuidString] ?? []
+    }
+
+    func save(_ projectIDs: [String], for profileID: UUID) {
+        var updated = values()
+        updated[profileID.uuidString] = projectIDs
+        userDefaults.set(updated, forKey: key)
+    }
+
+    func remove(for profileID: UUID) {
+        var updated = values()
+        updated.removeValue(forKey: profileID.uuidString)
+        userDefaults.set(updated, forKey: key)
+    }
+
+    private func values() -> [String: [String]] {
+        userDefaults.dictionary(forKey: key) as? [String: [String]] ?? [:]
+    }
+}
+
+enum ProjectDropPlacement: Equatable {
+    case before
+    case after
+}
+
+enum ProjectOrderResolver {
+    static func orderedProjects(_ projects: [OpenCodeProject], storedIDs: [String]) -> [OpenCodeProject] {
+        let orderedByRecency = projects.sorted { lhs, rhs in
+            if lhs.time.updated != rhs.time.updated {
+                return lhs.time.updated > rhs.time.updated
+            }
+
+            return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+        }
+        guard !storedIDs.isEmpty else { return orderedByRecency }
+
+        let storedIndexes = Dictionary(uniqueKeysWithValues: storedIDs.enumerated().map { ($1, $0) })
+
+        return orderedByRecency.sorted { lhs, rhs in
+            let lhsStoredIndex = storedIndexes[lhs.id]
+            let rhsStoredIndex = storedIndexes[rhs.id]
+
+            switch (lhsStoredIndex, rhsStoredIndex) {
+            case let (lhsIndex?, rhsIndex?) where lhsIndex != rhsIndex:
+                return lhsIndex < rhsIndex
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                if lhs.time.updated != rhs.time.updated {
+                    return lhs.time.updated > rhs.time.updated
+                }
+
+                return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
+            }
+        }
+    }
+
+    static func reorderedProjects(
+        _ projects: [OpenCodeProject],
+        movingProjectID: OpenCodeProject.ID,
+        relativeTo targetProjectID: OpenCodeProject.ID,
+        placement: ProjectDropPlacement
+    ) -> [OpenCodeProject] {
+        guard projects.count > 1 else { return projects }
+        guard movingProjectID != targetProjectID else { return projects }
+        guard let sourceIndex = projects.firstIndex(where: { $0.id == movingProjectID }) else { return projects }
+        guard let targetIndex = projects.firstIndex(where: { $0.id == targetProjectID }) else { return projects }
+
+        var reorderedProjects = projects
+        let movedProject = reorderedProjects.remove(at: sourceIndex)
+
+        var insertionIndex = targetIndex
+        if placement == .after {
+            insertionIndex += 1
+        }
+        if sourceIndex < insertionIndex {
+            insertionIndex -= 1
+        }
+
+        reorderedProjects.insert(movedProject, at: max(0, min(insertionIndex, reorderedProjects.count)))
+        return reorderedProjects
+    }
+}
+
+private extension Array {
+    mutating func moveItems(fromOffsets source: IndexSet, toOffset destination: Int) {
+        let movingItems = source.map { self[$0] }
+        var insertionIndex = destination
+
+        for index in source.sorted(by: >) {
+            remove(at: index)
+            if index < insertionIndex {
+                insertionIndex -= 1
+            }
+        }
+
+        insert(contentsOf: movingItems, at: insertionIndex)
     }
 }

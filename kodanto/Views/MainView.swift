@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import SwiftUI
 
 struct MainView: View {
@@ -9,6 +10,8 @@ struct MainView: View {
     @State private var promptEditorHeight: CGFloat = 0
     @State private var showingConnectionPopover = false
     @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
+    @State private var draggedProjectID: OpenCodeProject.ID?
+    @State private var projectDropTarget: ProjectDropTarget?
 
     private let transcriptScrollTarget = "transcript-bottom"
 
@@ -127,16 +130,27 @@ struct MainView: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Button {
+                ProjectSidebarRow(
+                    project: project,
+                    isExpanded: isExpanded,
+                    isActive: model.selectedProjectID == project.id,
+                    dropPlacement: dropPlacement(for: project.id),
+                    isDragSource: draggedProjectID == project.id
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
                     toggleProjectExpansion(for: project)
-                } label: {
-                    ProjectSidebarRow(
-                        project: project,
-                        isExpanded: isExpanded,
-                        isActive: model.selectedProjectID == project.id
-                    )
                 }
-                .buttonStyle(.plain)
+                .onDrag {
+                    draggedProjectID = project.id
+                    return NSItemProvider(object: NSString(string: project.id))
+                }
+                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarDropDelegate(
+                    targetProjectID: project.id,
+                    model: model,
+                    draggedProjectID: $draggedProjectID,
+                    dropTarget: $projectDropTarget
+                ))
 
                 if model.isLoadingSessions(for: project) {
                     ProgressView()
@@ -206,6 +220,11 @@ struct MainView: View {
         if shouldExpand {
             model.loadSessionsIfNeeded(for: project)
         }
+    }
+
+    private func dropPlacement(for projectID: OpenCodeProject.ID) -> ProjectDropPlacement? {
+        guard let projectDropTarget, projectDropTarget.projectID == projectID else { return nil }
+        return projectDropTarget.placement
     }
 
     private var detailPanel: some View {
@@ -647,6 +666,8 @@ private struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
     let isActive: Bool
+    let dropPlacement: ProjectDropPlacement?
+    let isDragSource: Bool
     @State private var isHovered = false
 
     var body: some View {
@@ -671,7 +692,18 @@ private struct ProjectSidebarRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(backgroundColor, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(alignment: overlayAlignment) {
+            if dropPlacement != nil {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(height: 2)
+                    .padding(.horizontal, 6)
+            }
+        }
+        .opacity(isDragSource ? 0.72 : 1)
         .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .animation(.easeInOut(duration: 0.12), value: dropPlacement)
+        .animation(.easeInOut(duration: 0.12), value: isDragSource)
         .onHover { hovering in
             isHovered = hovering
         }
@@ -683,6 +715,75 @@ private struct ProjectSidebarRow: View {
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+
+    private var overlayAlignment: Alignment {
+        switch dropPlacement {
+        case .before:
+            return .top
+        case .after:
+            return .bottom
+        case nil:
+            return .center
+        }
+    }
+}
+
+private struct ProjectDropTarget: Equatable {
+    let projectID: OpenCodeProject.ID
+    let placement: ProjectDropPlacement
+}
+
+private struct ProjectSidebarDropDelegate: DropDelegate {
+    let targetProjectID: OpenCodeProject.ID
+    let model: KodantoAppModel
+    @Binding var draggedProjectID: OpenCodeProject.ID?
+    @Binding var dropTarget: ProjectDropTarget?
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedProjectID, draggedProjectID != targetProjectID else { return }
+        let placement = placement(for: info)
+        let newTarget = ProjectDropTarget(projectID: targetProjectID, placement: placement)
+
+        if dropTarget != newTarget {
+            dropTarget = newTarget
+            model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard let draggedProjectID, draggedProjectID != targetProjectID else {
+            return DropProposal(operation: .forbidden)
+        }
+
+        let placement = placement(for: info)
+        let newTarget = ProjectDropTarget(projectID: targetProjectID, placement: placement)
+
+        if dropTarget != newTarget {
+            dropTarget = newTarget
+            model.moveProject(draggedProjectID, relativeTo: targetProjectID, placement: placement)
+        }
+
+        return DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        clearDropState()
+        return true
+    }
+
+    func dropExited(info: DropInfo) {
+        guard dropTarget?.projectID == targetProjectID else { return }
+        dropTarget = nil
+    }
+
+    private func placement(for info: DropInfo) -> ProjectDropPlacement {
+        info.location.y < 22 ? .before : .after
+    }
+
+    private func clearDropState() {
+        dropTarget = nil
+        draggedProjectID = nil
     }
 }
 
