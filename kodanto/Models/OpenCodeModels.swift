@@ -135,6 +135,7 @@ struct OpenCodeConfigProviders: Decodable {
     struct Model: Decodable {
         let id: String?
         let name: String?
+        let variants: [String: JSONValue]?
     }
 }
 
@@ -143,8 +144,41 @@ struct OpenCodeModelOption: Identifiable, Hashable {
     let providerName: String
     let modelID: String
     let modelName: String
+    let variants: [String]
 
     var id: String { "\(providerID)/\(modelID)" }
+
+    static func sortedVariantNames(_ names: [String]) -> [String] {
+        let preferredOrder = [
+            "thinking",
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+        ]
+        let preferredIndexes = Dictionary(uniqueKeysWithValues: preferredOrder.enumerated().map { ($1, $0) })
+
+        return names.sorted { lhs, rhs in
+            let lhsKey = lhs.lowercased()
+            let rhsKey = rhs.lowercased()
+            let lhsIndex = preferredIndexes[lhsKey]
+            let rhsIndex = preferredIndexes[rhsKey]
+
+            switch (lhsIndex, rhsIndex) {
+            case let (lhsIndex?, rhsIndex?):
+                return lhsIndex < rhsIndex
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+        }
+    }
 }
 
 struct OpenCodeModelProviderGroup: Identifiable, Hashable {
@@ -1136,6 +1170,7 @@ struct PromptRequestBody: Encodable {
     }
 
     let model: ModelSelection?
+    let variant: String?
     let parts: [Part]
 }
 

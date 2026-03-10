@@ -41,4 +41,54 @@ final class OpenCodeModelsTests: XCTestCase {
         XCTAssertEqual(tool.displayTitle, "Shows working tree status")
         XCTAssertEqual(part.summary, "Shows working tree status")
     }
+
+    func testConfigProvidersDecodeModelVariants() throws {
+        let data = Data(
+            #"""
+            {
+              "providers": [
+                {
+                  "id": "openai",
+                  "name": "OpenAI",
+                  "models": {
+                    "gpt-5": {
+                      "id": "gpt-5",
+                      "name": "GPT-5",
+                      "variants": {
+                        "minimal": {},
+                        "high": {},
+                        "xhigh": {}
+                      }
+                    }
+                  }
+                }
+              ],
+              "default": {
+                "openai": "gpt-5"
+              }
+            }
+            """#.utf8
+        )
+
+        let response = try JSONDecoder().decode(OpenCodeConfigProviders.self, from: data)
+        let model = try XCTUnwrap(response.providers.first?.models["gpt-5"])
+
+        XCTAssertEqual(Set(model.variants.map { Array($0.keys) } ?? []), ["minimal", "high", "xhigh"])
+    }
+
+    func testPromptRequestBodyEncodesVariant() throws {
+        let body = PromptRequestBody(
+            model: .init(providerID: "openai", modelID: "gpt-5"),
+            variant: "high",
+            parts: [.init(type: "text", text: "Hello")]
+        )
+
+        let data = try JSONEncoder().encode(body)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let model = try XCTUnwrap(json["model"] as? [String: String])
+
+        XCTAssertEqual(model["providerID"], "openai")
+        XCTAssertEqual(model["modelID"], "gpt-5")
+        XCTAssertEqual(json["variant"] as? String, "high")
+    }
 }

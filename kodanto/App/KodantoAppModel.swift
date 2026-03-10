@@ -39,6 +39,17 @@ final class KodantoAppModel {
         }
     }
 
+    private enum RequestActionError: LocalizedError {
+        case missingSelection
+
+        var errorDescription: String? {
+            switch self {
+            case .missingSelection:
+                return "Select a connected session before responding."
+            }
+        }
+    }
+
     var profiles: [ServerProfile] = []
     var selectedProfileID: ServerProfile.ID?
     var connectionState: ConnectionState = .idle
@@ -53,6 +64,7 @@ final class KodantoAppModel {
     var questions: [OpenCodeQuestionRequest] = []
     var availableModelGroups: [OpenCodeModelProviderGroup] = []
     var selectedModelID: String?
+    var selectedModelVariant: String?
     var isLoadingModels = false
     var modelLoadError: String?
     var pathInfo: OpenCodePathInfo?
@@ -67,10 +79,13 @@ final class KodantoAppModel {
     private let sidecar = SidecarProcess()
     private let storage = ServerProfileStore()
     private let modelSelectionStore = ModelSelectionStore()
+    private let modelVariantSelectionStore = ModelVariantSelectionStore()
+    private let permissionAutoAcceptStore = PermissionAutoAcceptStore()
     private let projectOrderStore = ProjectOrderStore()
     private var globalEventTask: Task<Void, Never>?
     private var heartbeatWatchdogTask: Task<Void, Never>?
     private var connectTask: Task<Void, Never>?
+    private var autoRespondingPermissionIDs: Set<String> = []
     private var liveSync = LiveSyncTracker()
     private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
     private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
@@ -91,6 +106,9 @@ final class KodantoAppModel {
             selectedProfileID = profiles.first?.id
         }
         selectedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
+        if let profileID = selectedProfileID, let selectedModelID {
+            selectedModelVariant = modelVariantSelectionStore.load(for: profileID, modelID: selectedModelID)
+        }
 
         sidecar.setOutputHandler { [weak self] line in
             guard let self else { return }
@@ -113,6 +131,26 @@ final class KodantoAppModel {
         sessions.first(where: { $0.id == selectedSessionID })
     }
 
+    var activePermissionRequest: OpenCodePermissionRequest? {
+        guard !isPermissionAutoAcceptEnabled else { return nil }
+        guard let selectedSessionID else { return nil }
+        return permissions.first(where: { $0.sessionID == selectedSessionID })
+    }
+
+    var activeQuestionRequest: OpenCodeQuestionRequest? {
+        guard let selectedSessionID else { return nil }
+        return questions.first(where: { $0.sessionID == selectedSessionID })
+    }
+
+    var isPermissionAutoAcceptEnabled: Bool {
+        guard let key = selectedPermissionAutoAcceptKey else { return false }
+        return permissionAutoAcceptStore.load()[key] ?? false
+    }
+
+    var canTogglePermissionAutoAccept: Bool {
+        selectedProject != nil && selectedSession != nil
+    }
+
     func loadedSessionNavigationTarget(for sessionID: OpenCodeSession.ID) -> SessionNavigationTarget? {
         guard let location = SessionNavigationTargetResolver.resolve(
             sessionID: sessionID,
@@ -133,6 +171,17 @@ final class KodantoAppModel {
         selectedModel.map {
             PromptRequestBody.ModelSelection(providerID: $0.providerID, modelID: $0.modelID)
         }
+    }
+
+    var selectedModelVariants: [String] {
+        selectedModel?.variants ?? []
+    }
+
+    var selectedPromptVariant: String? {
+        guard let selectedModel else { return nil }
+        guard let selectedModelVariant else { return nil }
+        guard selectedModel.variants.contains(selectedModelVariant) else { return nil }
+        return selectedModelVariant
     }
 
     var canCreateSession: Bool {
@@ -203,6 +252,11 @@ final class KodantoAppModel {
         stopLiveSync()
         selectedProfileID = profileID
         selectedModelID = modelSelectionStore.load(for: profileID)
+        if let selectedModelID {
+            selectedModelVariant = modelVariantSelectionStore.load(for: profileID, modelID: selectedModelID)
+        } else {
+            selectedModelVariant = nil
+        }
         connectionState = .idle
         projects = []
         selectedProjectID = nil
@@ -257,6 +311,7 @@ final class KodantoAppModel {
 
         profiles.removeAll { $0.id == profile.id }
         modelSelectionStore.remove(for: profile.id)
+        modelVariantSelectionStore.remove(for: profile.id)
         projectOrderStore.remove(for: profile.id)
         storage.save(profiles)
 
@@ -269,6 +324,24 @@ final class KodantoAppModel {
         selectedModelID = modelID
         guard let profileID = selectedProfileID else { return }
         modelSelectionStore.save(modelID, for: profileID)
+        if let option = availableModelGroups.flatMap(\.models).first(where: { $0.id == modelID }) {
+            let storedVariant = modelVariantSelectionStore.load(for: profileID, modelID: modelID)
+            selectedModelVariant = resolvedModelVariantSelection(storedVariant, availableVariants: option.variants)
+        } else {
+            selectedModelVariant = nil
+        }
+    }
+
+    func selectModelVariant(_ variant: String?) {
+        let normalizedVariant = resolvedModelVariantSelection(variant, availableVariants: selectedModelVariants)
+        selectedModelVariant = normalizedVariant
+
+        guard let profileID = selectedProfileID, let selectedModelID else { return }
+        if let normalizedVariant {
+            modelVariantSelectionStore.save(normalizedVariant, for: profileID, modelID: selectedModelID)
+        } else {
+            modelVariantSelectionStore.remove(for: profileID, modelID: selectedModelID)
+        }
     }
 
     func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int) {
@@ -421,7 +494,8 @@ final class KodantoAppModel {
                     sessionID: session.id,
                     directory: project.worktree,
                     text: text,
-                    model: selectedModelSelection
+                    model: selectedModelSelection,
+                    variant: selectedPromptVariant
                 )
                 try await loadSessionDetail(using: client)
                 try await loadSessions(for: project, using: client)
@@ -469,12 +543,31 @@ final class KodantoAppModel {
             guard let profile = selectedProfile, let project = selectedProject else { return }
             do {
                 let client = OpenCodeAPIClient(profile: profile)
-                try await client.replyToPermission(requestID: request.id, directory: project.worktree, reply: reply)
-                try await loadSessionDetail(using: client)
+                try await replyToPermission(request, reply: reply, using: client, directory: project.worktree)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
         }
+    }
+
+    func togglePermissionAutoAccept() {
+        setPermissionAutoAccept(!isPermissionAutoAcceptEnabled)
+    }
+
+    func setPermissionAutoAccept(_ enabled: Bool) {
+        guard let key = selectedPermissionAutoAcceptKey else { return }
+        var values = permissionAutoAcceptStore.load()
+        values[key] = enabled
+        permissionAutoAcceptStore.save(values)
+
+        if enabled {
+            autoRespondToPendingPermissionsIfNeeded()
+        }
+    }
+
+    func submitPermissionResponse(_ request: OpenCodePermissionRequest, reply: String) async throws {
+        let (client, directory) = try selectedPermissionActionContext()
+        try await replyToPermission(request, reply: reply, using: client, directory: directory)
     }
 
     func answerQuestion(_ request: OpenCodeQuestionRequest, answers: [[String]]) {
@@ -482,8 +575,7 @@ final class KodantoAppModel {
             guard let profile = selectedProfile, let project = selectedProject else { return }
             do {
                 let client = OpenCodeAPIClient(profile: profile)
-                try await client.replyToQuestion(requestID: request.id, directory: project.worktree, answers: answers)
-                try await loadSessionDetail(using: client)
+                try await answerQuestion(request, answers: answers, using: client, directory: project.worktree)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -495,12 +587,37 @@ final class KodantoAppModel {
             guard let profile = selectedProfile, let project = selectedProject else { return }
             do {
                 let client = OpenCodeAPIClient(profile: profile)
-                try await client.rejectQuestion(requestID: request.id, directory: project.worktree)
-                try await loadSessionDetail(using: client)
+                try await rejectQuestion(request, using: client, directory: project.worktree)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
         }
+    }
+
+    func submitQuestionAnswers(_ request: OpenCodeQuestionRequest, answers: [[String]]) async throws {
+        let (client, directory) = try selectedQuestionActionContext()
+        try await answerQuestion(request, answers: answers, using: client, directory: directory)
+    }
+
+    func submitQuestionRejection(_ request: OpenCodeQuestionRequest) async throws {
+        let (client, directory) = try selectedQuestionActionContext()
+        try await rejectQuestion(request, using: client, directory: directory)
+    }
+
+    private func selectedPermissionActionContext() throws -> (client: OpenCodeAPIClient, directory: String) {
+        guard let profile = selectedProfile, let project = selectedProject, selectedSession != nil else {
+            throw RequestActionError.missingSelection
+        }
+
+        return (OpenCodeAPIClient(profile: profile), project.worktree)
+    }
+
+    private func selectedQuestionActionContext() throws -> (client: OpenCodeAPIClient, directory: String) {
+        guard let profile = selectedProfile, let project = selectedProject, selectedSession != nil else {
+            throw RequestActionError.missingSelection
+        }
+
+        return (OpenCodeAPIClient(profile: profile), project.worktree)
     }
 
     private func refreshAll(using client: OpenCodeAPIClient, scope: RefreshScope) async throws {
@@ -591,11 +708,20 @@ final class KodantoAppModel {
             return
         }
 
+        let selectedSessionID = self.selectedSessionID
+        let directory = project.worktree
+
         async let permissionsTask = client.permissions(directory: project.worktree)
         async let questionsTask = client.questions(directory: project.worktree)
 
-        permissions = try await permissionsTask
-        questions = try await questionsTask
+        let loadedPermissions = try await permissionsTask
+        let loadedQuestions = try await questionsTask
+
+        guard selectedProject?.worktree == directory, self.selectedSessionID == selectedSessionID else { return }
+
+        permissions = loadedPermissions.filter { $0.sessionID == selectedSessionID }
+        questions = loadedQuestions.filter { $0.sessionID == selectedSessionID }
+        autoRespondToPendingPermissionsIfNeeded()
 
         guard let session = selectedSession else {
             resetMessageCaches()
@@ -607,8 +733,13 @@ final class KodantoAppModel {
         async let messagesTask = client.messages(sessionID: session.id, directory: project.worktree)
         async let todosTask = client.sessionTodos(sessionID: session.id, directory: project.worktree)
 
-        replaceMessages(try await messagesTask)
-        sessionTodos = try await todosTask
+        let loadedMessages = try await messagesTask
+        let loadedTodos = try await todosTask
+
+        guard selectedProject?.worktree == directory, self.selectedSessionID == selectedSessionID else { return }
+
+        replaceMessages(loadedMessages)
+        sessionTodos = loadedTodos
     }
 
     private func startLiveSync(for profile: ServerProfile) {
@@ -890,11 +1021,14 @@ final class KodantoAppModel {
         } else {
             permissions.append(request)
         }
+
+        autoRespondToPendingPermissionsIfNeeded()
     }
 
     private func removePermission(sessionID: String, requestID: String) {
         guard sessionID == selectedSessionID else { return }
         permissions.removeAll { $0.id == requestID }
+        autoRespondingPermissionIDs.remove(requestID)
     }
 
     private func upsertQuestion(_ request: OpenCodeQuestionRequest) {
@@ -909,6 +1043,68 @@ final class KodantoAppModel {
     private func removeQuestion(sessionID: String, requestID: String) {
         guard sessionID == selectedSessionID else { return }
         questions.removeAll { $0.id == requestID }
+    }
+
+    private func answerQuestion(
+        _ request: OpenCodeQuestionRequest,
+        answers: [[String]],
+        using client: OpenCodeAPIClient,
+        directory: String
+    ) async throws {
+        try await client.replyToQuestion(requestID: request.id, directory: directory, answers: answers)
+        try await loadSessionDetail(using: client)
+    }
+
+    private func rejectQuestion(
+        _ request: OpenCodeQuestionRequest,
+        using client: OpenCodeAPIClient,
+        directory: String
+    ) async throws {
+        try await client.rejectQuestion(requestID: request.id, directory: directory)
+        try await loadSessionDetail(using: client)
+    }
+
+    private func replyToPermission(
+        _ request: OpenCodePermissionRequest,
+        reply: String,
+        using client: OpenCodeAPIClient,
+        directory: String
+    ) async throws {
+        try await client.replyToPermission(requestID: request.id, directory: directory, reply: reply)
+        try await loadSessionDetail(using: client)
+    }
+
+    private func autoRespondToPendingPermissionsIfNeeded() {
+        guard isPermissionAutoAcceptEnabled else { return }
+
+        let pendingRequests = permissions.filter { request in
+            request.sessionID == selectedSessionID && !autoRespondingPermissionIDs.contains(request.id)
+        }
+        guard !pendingRequests.isEmpty else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+
+            for request in pendingRequests {
+                guard self.isPermissionAutoAcceptEnabled, self.selectedSessionID == request.sessionID else { break }
+                guard self.autoRespondingPermissionIDs.insert(request.id).inserted else { continue }
+
+                defer {
+                    self.autoRespondingPermissionIDs.remove(request.id)
+                }
+
+                do {
+                    try await self.submitPermissionResponse(request, reply: "once")
+                } catch {
+                    self.connectionState = .failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private var selectedPermissionAutoAcceptKey: String? {
+        guard let selectedSessionID, let directory = selectedProject?.worktree else { return nil }
+        return PermissionAutoAcceptStore.makeKey(sessionID: selectedSessionID, directory: directory)
     }
 
     private func rebuildSelectedSessionMessages() {
@@ -1040,7 +1236,8 @@ final class KodantoAppModel {
                             providerID: provider.id,
                             providerName: provider.name,
                             modelID: resolvedModelID,
-                            modelName: (model.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? resolvedModelID
+                            modelName: (model.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? resolvedModelID,
+                            variants: OpenCodeModelOption.sortedVariantNames(model.variants.map { Array($0.keys) } ?? [])
                         )
                     }
                     .sorted {
@@ -1056,7 +1253,7 @@ final class KodantoAppModel {
             }
             .filter { !$0.models.isEmpty }
 
-        let availableIDs = Set(groups.flatMap(\.models).map(\.id))
+        let availableIDs = Set(groups.flatMap { $0.models }.map { $0.id })
         let storedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
         let configuredModelID = normalizedModelIdentifier(config.model)
         let providerDefaultModelID = resolvedProviderDefaultModelID(from: providersResponse.default, groups: groups)
@@ -1069,6 +1266,8 @@ final class KodantoAppModel {
     }
 
     private func applyModelCatalog(_ catalog: ResolvedModelCatalog) {
+        let previousSelectedModelID = selectedModelID
+
         if availableModelGroups != catalog.groups {
             availableModelGroups = catalog.groups
         }
@@ -1080,8 +1279,22 @@ final class KodantoAppModel {
         guard let profileID = selectedProfileID else { return }
         if let selectedModelID = catalog.selectedModelID {
             modelSelectionStore.save(selectedModelID, for: profileID)
+
+            let availableVariants = catalog.groups
+                .flatMap { $0.models }
+                .first(where: { $0.id == selectedModelID })?
+                .variants ?? []
+            let storedVariant = modelVariantSelectionStore.load(for: profileID, modelID: selectedModelID)
+
+            if previousSelectedModelID == selectedModelID {
+                selectedModelVariant = resolvedModelVariantSelection(selectedModelVariant, availableVariants: availableVariants)
+                    ?? resolvedModelVariantSelection(storedVariant, availableVariants: availableVariants)
+            } else {
+                selectedModelVariant = resolvedModelVariantSelection(storedVariant, availableVariants: availableVariants)
+            }
         } else {
             modelSelectionStore.remove(for: profileID)
+            selectedModelVariant = nil
         }
     }
 
@@ -1089,6 +1302,14 @@ final class KodantoAppModel {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return nil
         }
+        return value
+    }
+
+    private func resolvedModelVariantSelection(_ value: String?, availableVariants: [String]) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        guard availableVariants.contains(value) else { return nil }
         return value
     }
 
@@ -1163,6 +1384,56 @@ private struct ModelSelectionStore {
 
     private func values() -> [String: String] {
         UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+    }
+}
+
+private struct ModelVariantSelectionStore {
+    private let key = "kodanto.selectedModelVariantByProfile"
+
+    func load(for profileID: UUID, modelID: String) -> String? {
+        values()[profileID.uuidString]?[modelID]
+    }
+
+    func save(_ variant: String, for profileID: UUID, modelID: String) {
+        var updated = values()
+        var profileValues = updated[profileID.uuidString] ?? [:]
+        profileValues[modelID] = variant
+        updated[profileID.uuidString] = profileValues
+        UserDefaults.standard.set(updated, forKey: key)
+    }
+
+    func remove(for profileID: UUID, modelID: String) {
+        var updated = values()
+        var profileValues = updated[profileID.uuidString] ?? [:]
+        profileValues.removeValue(forKey: modelID)
+        updated[profileID.uuidString] = profileValues.isEmpty ? nil : profileValues
+        UserDefaults.standard.set(updated, forKey: key)
+    }
+
+    func remove(for profileID: UUID) {
+        var updated = values()
+        updated.removeValue(forKey: profileID.uuidString)
+        UserDefaults.standard.set(updated, forKey: key)
+    }
+
+    private func values() -> [String: [String: String]] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: [String: String]] ?? [:]
+    }
+}
+
+private struct PermissionAutoAcceptStore {
+    private let key = "kodanto.permissionAutoAccept"
+
+    func load() -> [String: Bool] {
+        UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+    }
+
+    func save(_ values: [String: Bool]) {
+        UserDefaults.standard.set(values, forKey: key)
+    }
+
+    static func makeKey(sessionID: String, directory: String) -> String {
+        "\(directory)|\(sessionID)"
     }
 }
 

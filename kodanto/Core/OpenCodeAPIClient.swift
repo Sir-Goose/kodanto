@@ -75,12 +75,18 @@ struct OpenCodeAPIClient {
         )
     }
 
-    func sendPrompt(sessionID: String, directory: String, text: String, model: PromptRequestBody.ModelSelection?) async throws {
+    func sendPrompt(
+        sessionID: String,
+        directory: String,
+        text: String,
+        model: PromptRequestBody.ModelSelection?,
+        variant: String?
+    ) async throws {
         try await requestNoContent(
             path: "/session/\(sessionID)/prompt_async",
             method: "POST",
             directory: directory,
-            body: AnyEncodable(PromptRequestBody(model: model, parts: [.init(type: "text", text: text)]))
+            body: AnyEncodable(PromptRequestBody(model: model, variant: variant, parts: [.init(type: "text", text: text)]))
         )
     }
 

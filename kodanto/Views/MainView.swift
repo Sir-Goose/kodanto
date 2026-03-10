@@ -145,14 +145,12 @@ struct MainView: View {
         let isExpanded = expandedProjectIDs.contains(project.id)
         let sessions = model.sessions(for: project)
         let projectFocusItem = SidebarFocusItem.project(project.id)
-        let isFocused = sidebarFocusedItem == projectFocusItem
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 ProjectSidebarRow(
                     project: project,
                     isExpanded: isExpanded,
-                    isFocused: isFocused,
                     dropPlacement: dropPlacement(for: project.id)
                 )
                 .contentShape(Rectangle())
@@ -408,52 +406,6 @@ struct MainView: View {
                                         )
                                     }
 
-                                    if !model.permissions.isEmpty {
-                                        InspectorSection(title: "Permissions") {
-                                            ForEach(model.permissions) { request in
-                                                VStack(alignment: .leading, spacing: 8) {
-                                                    Text(request.permission)
-                                                        .font(.headline)
-                                                    Text(request.patterns.joined(separator: ", "))
-                                                        .font(.caption)
-                                                        .foregroundStyle(.secondary)
-                                                    HStack {
-                                                        Button("Allow Once") {
-                                                            model.respondToPermission(request, reply: "once")
-                                                        }
-                                                        Button("Always") {
-                                                            model.respondToPermission(request, reply: "always")
-                                                        }
-                                                        Button("Reject", role: .destructive) {
-                                                            model.respondToPermission(request, reply: "reject")
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if !model.questions.isEmpty {
-                                        InspectorSection(title: "Questions") {
-                                            ForEach(model.questions) { request in
-                                                VStack(alignment: .leading, spacing: 10) {
-                                                    Text(request.questions.first?.question ?? "Question")
-                                                        .font(.headline)
-                                                    if let options = request.questions.first?.options, !options.isEmpty {
-                                                        ForEach(options) { option in
-                                                            Button(option.label) {
-                                                                model.answerQuestion(request, answers: [[option.label]])
-                                                            }
-                                                        }
-                                                    }
-                                                    Button("Reject", role: .destructive) {
-                                                        model.rejectQuestion(request)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
                                     Color.clear
                                         .frame(height: 1)
                                         .id(transcriptScrollTarget)
@@ -697,6 +649,8 @@ struct MainView: View {
                 .frame(height: resolvedPromptHeight, alignment: .topLeading)
 
                 ModelPickerRow(model: model)
+
+                permissionAutoAcceptButton
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
@@ -721,12 +675,48 @@ struct MainView: View {
         .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
     }
 
+    private var permissionAutoAcceptButton: some View {
+        Button {
+            model.togglePermissionAutoAccept()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: model.isPermissionAutoAcceptEnabled ? "chevron.double.right" : "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(model.isPermissionAutoAcceptEnabled ? Color.green : Color.secondary)
+
+                Text("Auto-accept permissions")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(permissionAutoAcceptBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canTogglePermissionAutoAccept)
+        .help(model.isPermissionAutoAcceptEnabled ? "Stop auto-accepting permission requests" : "Auto-accept permission requests for this session")
+        .opacity(model.canTogglePermissionAutoAccept ? 1 : 0.45)
+    }
+
+    private var permissionAutoAcceptBackground: Color {
+        model.isPermissionAutoAcceptEnabled ? Color.green.opacity(0.12) : Color.secondary.opacity(0.08)
+    }
+
     private func bottomPanel(maxHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: Self.composerContentGap) {
             SessionTodoDockView(todos: model.sessionTodos)
                 .id(model.selectedSessionID ?? "session-todo-dock")
 
-            composer(maxHeight: maxHeight)
+            if let request = model.activePermissionRequest {
+                SessionPermissionDockView(model: model, request: request)
+                    .id(request.id)
+            } else if let request = model.activeQuestionRequest {
+                SessionQuestionDockView(model: model, request: request)
+                    .id(request.id)
+            } else {
+                composer(maxHeight: maxHeight)
+            }
         }
     }
 
@@ -1116,7 +1106,6 @@ private struct ConnectionSwitchRow: View {
 private struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
-    let isFocused: Bool
     let dropPlacement: ProjectDropPlacement?
     @State private var isHovered = false
 
@@ -1158,10 +1147,6 @@ private struct ProjectSidebarRow: View {
     }
 
     private var backgroundColor: Color {
-        if isFocused {
-            return Color.secondary.opacity(0.14)
-        }
-
         return isHovered ? Color.secondary.opacity(0.08) : .clear
     }
 
@@ -1625,6 +1610,8 @@ private struct ModelPickerRow: View {
                         isShowingPicker = false
                     }
                 }
+
+                ThinkingEffortPicker(model: model)
             } else if let modelLoadError = model.modelLoadError {
                 Text(modelLoadError)
                     .font(.caption)
@@ -1648,6 +1635,80 @@ private struct ModelPickerRow: View {
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+private struct ThinkingEffortPicker: View {
+    @Bindable var model: KodantoAppModel
+    @State private var isHovered = false
+
+    private var selectionLabel: String {
+        model.selectedPromptVariant ?? "Default"
+    }
+
+    private var hasVariants: Bool {
+        !model.selectedModelVariants.isEmpty
+    }
+
+    var body: some View {
+        Menu {
+            Button {
+                model.selectModelVariant(nil)
+            } label: {
+                optionLabel("Default", isSelected: model.selectedPromptVariant == nil)
+            }
+
+            ForEach(model.selectedModelVariants, id: \.self) { variant in
+                Button {
+                    model.selectModelVariant(variant)
+                } label: {
+                    optionLabel(variant, isSelected: model.selectedPromptVariant == variant)
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Text("Thinking")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                Text(selectionLabel)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(backgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(!hasVariants)
+        .help("Thinking effort")
+        .accessibilityIdentifier("thinking-effort-picker")
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+
+    @ViewBuilder
+    private func optionLabel(_ title: String, isSelected: Bool) -> some View {
+        if isSelected {
+            Label(title, systemImage: "checkmark")
+        } else {
+            Text(title)
+        }
+    }
+
+    private var backgroundColor: Color {
+        isHovered ? Color.secondary.opacity(0.08) : .clear
     }
 }
 
