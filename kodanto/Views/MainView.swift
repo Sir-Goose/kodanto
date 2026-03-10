@@ -648,9 +648,7 @@ struct MainView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .frame(height: resolvedPromptHeight, alignment: .topLeading)
 
-                ModelPickerRow(model: model)
-
-                permissionAutoAcceptButton
+                ComposerControlsRow(model: model)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
 
@@ -673,34 +671,6 @@ struct MainView: View {
                 .stroke(Color.secondary.opacity(0.18))
         )
         .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
-    }
-
-    private var permissionAutoAcceptButton: some View {
-        Button {
-            model.togglePermissionAutoAccept()
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: model.isPermissionAutoAcceptEnabled ? "chevron.double.right" : "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(model.isPermissionAutoAcceptEnabled ? Color.green : Color.secondary)
-
-                Text("Auto-accept permissions")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.primary)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(permissionAutoAcceptBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(!model.canTogglePermissionAutoAccept)
-        .help(model.isPermissionAutoAcceptEnabled ? "Stop auto-accepting permission requests" : "Auto-accept permission requests for this session")
-        .opacity(model.canTogglePermissionAutoAccept ? 1 : 0.45)
-    }
-
-    private var permissionAutoAcceptBackground: Color {
-        model.isPermissionAutoAcceptEnabled ? Color.green.opacity(0.12) : Color.secondary.opacity(0.08)
     }
 
     private func bottomPanel(maxHeight: CGFloat) -> some View {
@@ -1559,7 +1529,7 @@ private struct ToolCallCard: View {
     }
 }
 
-private struct ModelPickerRow: View {
+private struct ComposerControlsRow: View {
     @Bindable var model: KodantoAppModel
     @State private var isHovered = false
     @State private var isShowingPicker = false
@@ -1583,11 +1553,13 @@ private struct ModelPickerRow: View {
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
 
                         Text(selectedModel.providerName)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.tail)
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
@@ -1624,6 +1596,7 @@ private struct ModelPickerRow: View {
                     .foregroundStyle(.secondary)
             }
 
+            PermissionAutoAcceptToggle(model: model)
             Spacer(minLength: 0)
         }
         .frame(minHeight: MainView.composerModelRowHeight, alignment: .center)
@@ -1635,6 +1608,29 @@ private struct ModelPickerRow: View {
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+private struct PermissionAutoAcceptToggle: View {
+    @Bindable var model: KodantoAppModel
+
+    private var isOn: Binding<Bool> {
+        Binding(
+            get: { model.isPermissionAutoAcceptEnabled },
+            set: { model.setPermissionAutoAccept($0) }
+        )
+    }
+
+    var body: some View {
+        Toggle("Full Access", isOn: isOn)
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .font(.caption.weight(.medium))
+            .fixedSize()
+            .disabled(!model.canTogglePermissionAutoAccept)
+            .help(model.isPermissionAutoAcceptEnabled ? "Stop auto-accepting permission requests" : "Auto-accept permission requests for this session")
+            .opacity(model.canTogglePermissionAutoAccept ? 1 : 0.45)
+            .accessibilityIdentifier("permission-auto-accept-toggle")
     }
 }
 
