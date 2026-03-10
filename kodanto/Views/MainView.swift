@@ -57,8 +57,13 @@ struct MainView: View {
         }
         .sheet(isPresented: $model.showingConnectionSheet) {
             ConnectionSheet(existingProfile: editingProfile) { profile in
-                model.saveProfile(profile)
+                saveConnectionProfile(profile, selectAfterSave: true, connectAfterSave: true)
                 editingProfile = nil
+            }
+        }
+        .sheet(isPresented: $model.showingConnectionsManager) {
+            ConnectionsManagerSheet(model: model) { profile in
+                activateConnection(profile, dismissPopover: false)
             }
         }
         .background {
@@ -67,7 +72,7 @@ struct MainView: View {
         }
         .task {
             if case .idle = model.connectionState {
-                await model.connectSelectedProfile()
+                model.connect()
             }
         }
         .task(id: model.selectedProjectID) {
@@ -87,19 +92,7 @@ struct MainView: View {
     private var sidebar: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                sidebarSectionHeader("Servers")
-                    .padding(.horizontal, 10)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(model.profiles) { profile in
-                        serverRow(for: profile)
-                    }
-                    addConnectionRow
-                }
-                .padding(.horizontal, 8)
-
                 sidebarSectionHeader("Projects")
-                    .padding(.top, 12)
                     .padding(.horizontal, 10)
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -241,8 +234,7 @@ struct MainView: View {
     }
 
     private var sidebarFocusableItems: [SidebarFocusItem] {
-        var items = model.profiles.map { SidebarFocusItem.server($0.id) }
-        items.append(.addConnection)
+        var items: [SidebarFocusItem] = []
         for project in model.projects {
             items.append(.project(project.id))
             guard expandedProjectIDs.contains(project.id) else { continue }
@@ -258,78 +250,6 @@ struct MainView: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
             .padding(.bottom, 4)
-    }
-
-    private func serverRow(for profile: ServerProfile) -> some View {
-        let focusItem = SidebarFocusItem.server(profile.id)
-        let isSelected = model.selectedProfileID == profile.id
-        let isFocused = sidebarFocusedItem == focusItem
-
-        return HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(profile.name)
-                Text(profile.normalizedBaseURL)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if isSelected {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.tint)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(serverRowBackground(isSelected: isSelected, isFocused: isFocused), in: RoundedRectangle(cornerRadius: 10))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            setSidebarFocus(focusItem)
-            model.selectProfile(profile.id)
-        }
-        .contextMenu {
-            Button("Edit") {
-                editingProfile = profile
-                model.showingConnectionSheet = true
-            }
-            Button("Delete", role: .destructive) {
-                model.deleteProfile(profile)
-            }
-            .disabled(model.profiles.count == 1)
-        }
-    }
-
-    private var addConnectionRow: some View {
-        let isFocused = sidebarFocusedItem == .addConnection
-        return HStack(spacing: 8) {
-            Image(systemName: "plus")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text("Add Connection")
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(connectionRowBackground(isFocused: isFocused), in: RoundedRectangle(cornerRadius: 10))
-        .contentShape(Rectangle())
-        .onTapGesture {
-            setSidebarFocus(.addConnection)
-            presentAddConnection()
-        }
-    }
-
-    private func serverRowBackground(isSelected: Bool, isFocused: Bool) -> Color {
-        if isSelected {
-            return Color.accentColor.opacity(0.14)
-        }
-        if isFocused {
-            return Color.secondary.opacity(0.14)
-        }
-        return .clear
-    }
-
-    private func connectionRowBackground(isFocused: Bool) -> Color {
-        isFocused ? Color.secondary.opacity(0.14) : .clear
     }
 
     private func setSidebarFocus(_ item: SidebarFocusItem) {
@@ -365,8 +285,6 @@ struct MainView: View {
             expandedProjectIDs.remove(projectID)
         case let .session(projectID, _):
             self.sidebarFocusedItem = .project(projectID)
-        default:
-            break
         }
     }
 
@@ -385,7 +303,7 @@ struct MainView: View {
                     model.loadSessionsIfNeeded(for: project)
                 }
             }
-        default:
+        case .session:
             break
         }
     }
@@ -399,10 +317,6 @@ struct MainView: View {
         }
 
         switch sidebarFocusedItem {
-        case let .server(profileID):
-            model.selectProfile(profileID)
-        case .addConnection:
-            presentAddConnection()
         case let .project(projectID):
             guard let project = model.projects.first(where: { $0.id == projectID }) else { return }
             toggleProjectExpansion(for: project)
@@ -412,8 +326,40 @@ struct MainView: View {
     }
 
     private func presentAddConnection() {
+        showingConnectionPopover = false
         editingProfile = nil
         model.showingConnectionSheet = true
+    }
+
+    private func presentConnectionsManager() {
+        showingConnectionPopover = false
+        model.showingConnectionsManager = true
+    }
+
+    private func activateConnection(_ profile: ServerProfile, dismissPopover: Bool = true) {
+        let isSwitchingProfiles = model.selectedProfileID != profile.id
+        if isSwitchingProfiles {
+            model.selectProfile(profile.id)
+        }
+
+        if isSwitchingProfiles || model.canConnect {
+            model.connect()
+        }
+
+        if dismissPopover {
+            showingConnectionPopover = false
+        }
+    }
+
+    private func saveConnectionProfile(
+        _ profile: ServerProfile,
+        selectAfterSave: Bool,
+        connectAfterSave: Bool
+    ) {
+        model.saveProfile(profile, selectAfterSave: selectAfterSave)
+        if connectAfterSave {
+            model.connect()
+        }
     }
 
     private func toggleProjectExpansion(for project: OpenCodeProject) {
@@ -567,18 +513,39 @@ struct MainView: View {
         Button {
             showingConnectionPopover.toggle()
         } label: {
-            Circle()
-                .fill(connectionIndicatorColor)
-                .frame(width: 12, height: 12)
-                .overlay {
-                    Circle()
-                        .stroke(.white.opacity(0.9), lineWidth: 1)
-                }
-                .shadow(color: connectionIndicatorColor.opacity(0.35), radius: 3)
-                .padding(.top, 10)
-                .padding(.leading, 6)
-                .padding(.bottom, 6)
-                .padding(.trailing, 20)
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(connectionIndicatorColor)
+                    .frame(width: 10, height: 10)
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.9), lineWidth: 1)
+                    }
+                    .shadow(color: connectionIndicatorColor.opacity(0.35), radius: 3)
+
+                Text(activeConnectionName)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: 180, alignment: .leading)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 6)
+            .padding(.leading, 10)
+            .padding(.trailing, 12)
+            .background(.regularMaterial, in: Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(Color.secondary.opacity(showingConnectionPopover ? 0.22 : 0.14), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+            .padding(.top, 8)
+            .padding(.leading, 6)
+            .padding(.bottom, 6)
+            .padding(.trailing, 16)
         }
         .buttonStyle(.plain)
         .help(connectionToolbarHelp)
@@ -588,34 +555,115 @@ struct MainView: View {
     }
 
     private var connectionPopover: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label(connectionStatusTitle, systemImage: connectionStatusSymbol)
-            Label(liveSyncStatusTitle, systemImage: liveSyncStatusSymbol)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: activeConnectionIconName)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(activeConnectionName)
+                            .font(.headline)
+                        Text(activeConnectionDetail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                Label(connectionStatusTitle, systemImage: connectionStatusSymbol)
+                    .font(.callout)
+                Label(liveSyncStatusTitle, systemImage: liveSyncStatusSymbol)
+                    .font(.callout)
+            }
+
+            if model.profiles.count > 1 {
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Switch Connection")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(model.profiles) { profile in
+                            let isSelected = model.selectedProfileID == profile.id
+                            let isDisabled = isSelected && !model.canConnect
+
+                            Button {
+                                activateConnection(profile)
+                            } label: {
+                                ConnectionSwitchRow(
+                                    profile: profile,
+                                    isSelected: isSelected
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isDisabled)
+                        }
+                    }
+                }
+            }
 
             Divider()
 
-            if model.canConnect {
-                Button(connectionActionTitle) {
+            VStack(alignment: .leading, spacing: 6) {
+                if model.canConnect {
+                    Button(connectionActionTitle) {
+                        showingConnectionPopover = false
+                        model.connect()
+                    }
+                }
+
+                if model.canRefresh {
+                    Button("Refresh") {
+                        showingConnectionPopover = false
+                        model.refresh()
+                    }
+                }
+
+                Button("Add Connection...") {
+                    presentAddConnection()
+                }
+
+                Button("Manage Connections...") {
+                    presentConnectionsManager()
+                }
+
+                Button("Diagnostics") {
                     showingConnectionPopover = false
-                    model.connect()
+                    model.showingDiagnostics = true
                 }
             }
 
-            if model.canRefresh {
-                Button("Refresh") {
-                    showingConnectionPopover = false
-                    model.refresh()
-                }
-            }
-
-            Button("Diagnostics") {
-                showingConnectionPopover = false
-                model.showingDiagnostics = true
-            }
+            Text("Switching connections reloads projects and sessions.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .labelStyle(.titleAndIcon)
         .padding(16)
-        .frame(minWidth: 220, alignment: .leading)
+        .frame(width: 320, alignment: .leading)
+    }
+
+    private var activeConnectionName: String {
+        model.selectedProfile?.name ?? "No Connection"
+    }
+
+    private var activeConnectionDetail: String {
+        guard let profile = model.selectedProfile else {
+            return "Add a connection to get started."
+        }
+
+        return "\(profile.connectionTypeLabel) - \(profile.normalizedBaseURL)"
+    }
+
+    private var activeConnectionIconName: String {
+        model.selectedProfile?.connectionIconName ?? "network"
     }
 
     private func composer(maxHeight: CGFloat) -> some View {
@@ -771,7 +819,7 @@ struct MainView: View {
     }
 
     private var connectionToolbarHelp: String {
-        "\(connectionStatusTitle). \(liveSyncStatusTitle)."
+        "\(activeConnectionName). \(connectionStatusTitle). \(liveSyncStatusTitle)."
     }
 
     private var connectionActionTitle: String {
@@ -866,6 +914,202 @@ private struct DiagnosticsSheet: View {
         }
         .padding()
         .frame(width: 680, height: 620)
+    }
+}
+
+private struct ConnectionsManagerSheet: View {
+    @Bindable var model: KodantoAppModel
+    let onActivateProfile: (ServerProfile) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var editingProfile: ServerProfile?
+    @State private var showingConnectionSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Connections")
+                        .font(.title2.weight(.semibold))
+                    Text("Local is the default, but you can keep remote connections ready to switch into.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Done") {
+                    dismiss()
+                }
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(model.profiles) { profile in
+                        ConnectionManagerRow(
+                            profile: profile,
+                            isSelected: model.selectedProfileID == profile.id,
+                            isConnectable: model.selectedProfileID != profile.id || model.canConnect,
+                            canDelete: model.profiles.count > 1,
+                            onActivate: {
+                                onActivateProfile(profile)
+                            },
+                            onEdit: {
+                                editingProfile = profile
+                                showingConnectionSheet = true
+                            },
+                            onDelete: {
+                                model.deleteProfile(profile)
+                            }
+                        )
+                    }
+                }
+            }
+
+            HStack {
+                Button {
+                    editingProfile = nil
+                    showingConnectionSheet = true
+                } label: {
+                    Label("Add Connection", systemImage: "plus")
+                }
+
+                Spacer()
+
+                Text("Switching connections reloads projects and sessions.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(20)
+        .frame(width: 620, height: 460)
+        .sheet(isPresented: $showingConnectionSheet) {
+            ConnectionSheet(existingProfile: editingProfile) { profile in
+                model.saveProfile(profile, selectAfterSave: false)
+                if model.selectedProfileID == profile.id {
+                    model.connect()
+                }
+                editingProfile = nil
+                showingConnectionSheet = false
+            }
+        }
+    }
+}
+
+private struct ConnectionManagerRow: View {
+    let profile: ServerProfile
+    let isSelected: Bool
+    let isConnectable: Bool
+    let canDelete: Bool
+    let onActivate: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: profile.connectionIconName)
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(profile.name)
+                            .font(.headline)
+                        if isSelected {
+                            Text("Current")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tint)
+                        }
+                    }
+
+                    Text(profile.connectionTypeLabel)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+
+                    Text(profile.normalizedBaseURL)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 10) {
+                Button(primaryActionTitle) {
+                    onActivate()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!isConnectable)
+
+                Button("Edit") {
+                    onEdit()
+                }
+
+                Button("Delete", role: .destructive) {
+                    onDelete()
+                }
+                .disabled(!canDelete)
+
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var primaryActionTitle: String {
+        if isSelected {
+            return isConnectable ? "Reconnect" : "Current Connection"
+        }
+
+        return "Switch and Connect"
+    }
+}
+
+private struct ConnectionSwitchRow: View {
+    let profile: ServerProfile
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: profile.connectionIconName)
+                .foregroundStyle(.secondary)
+                .frame(width: 14)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(profile.name)
+                    .font(.callout.weight(isSelected ? .medium : .regular))
+                    .foregroundStyle(.primary)
+                Text(profile.connectionDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if isSelected {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.tint)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var rowBackground: Color {
+        if isSelected {
+            return Color.accentColor.opacity(0.12)
+        }
+
+        return Color.secondary.opacity(0.05)
     }
 }
 
@@ -1081,8 +1325,6 @@ private struct ProjectHeaderFramePreferenceKey: PreferenceKey {
 }
 
 enum SidebarFocusItem: Hashable {
-    case server(ServerProfile.ID)
-    case addConnection
     case project(OpenCodeProject.ID)
     case session(projectID: OpenCodeProject.ID, sessionID: OpenCodeSession.ID)
 }

@@ -59,6 +59,7 @@ final class KodantoAppModel {
     var draftPrompt = ""
     var sidecarLog = ""
     var showingConnectionSheet = false
+    var showingConnectionsManager = false
     var showingDiagnostics = false
     var lastSSEError: String?
     var loadingSessionDirectories: Set<String> = []
@@ -69,6 +70,7 @@ final class KodantoAppModel {
     private let projectOrderStore = ProjectOrderStore()
     private var globalEventTask: Task<Void, Never>?
     private var heartbeatWatchdogTask: Task<Void, Never>?
+    private var connectTask: Task<Void, Never>?
     private var liveSync = LiveSyncTracker()
     private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
     private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
@@ -195,7 +197,9 @@ final class KodantoAppModel {
         )
     }
 
-    func selectProfile(_ profileID: ServerProfile.ID) {
+    func selectProfile(_ profileID: ServerProfile.ID, forceReset: Bool = false) {
+        guard forceReset || selectedProfileID != profileID else { return }
+        connectTask?.cancel()
         stopLiveSync()
         selectedProfileID = profileID
         selectedModelID = modelSelectionStore.load(for: profileID)
@@ -221,11 +225,15 @@ final class KodantoAppModel {
         resetMessageCaches()
     }
 
-    func saveProfile(_ profile: ServerProfile) {
+    func saveProfile(_ profile: ServerProfile, selectAfterSave: Bool = true) {
         var profile = profile
         if profile.kind == .localSidecar, profile.password?.isEmpty != false {
             profile.password = UUID().uuidString
         }
+
+        let existingProfile = profiles.first(where: { $0.id == profile.id })
+        let shouldResetSelectedProfile = selectedProfileID == profile.id && existingProfile != profile
+        let shouldResetSelection = selectAfterSave || shouldResetSelectedProfile
 
         if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
             profiles[index] = profile
@@ -233,20 +241,28 @@ final class KodantoAppModel {
             profiles.append(profile)
         }
         storage.save(profiles)
-        selectedProfileID = profile.id
-        selectedModelID = modelSelectionStore.load(for: profile.id)
+
+        if shouldResetSelection {
+            selectProfile(profile.id, forceReset: true)
+        }
     }
 
     func deleteProfile(_ profile: ServerProfile) {
         guard profiles.count > 1 else { return }
+
+        let isDeletingSelectedProfile = selectedProfileID == profile.id
+        let fallbackProfileID = isDeletingSelectedProfile
+            ? profiles.first(where: { $0.id != profile.id })?.id
+            : nil
+
         profiles.removeAll { $0.id == profile.id }
         modelSelectionStore.remove(for: profile.id)
         projectOrderStore.remove(for: profile.id)
-        if selectedProfileID == profile.id {
-            selectedProfileID = profiles.first?.id
-            selectedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
-        }
         storage.save(profiles)
+
+        if let fallbackProfileID {
+            selectProfile(fallbackProfileID, forceReset: true)
+        }
     }
 
     func selectModel(_ modelID: String) {
@@ -299,8 +315,9 @@ final class KodantoAppModel {
     }
 
     func connect() {
-        Task {
-            await connectSelectedProfile()
+        connectTask?.cancel()
+        connectTask = Task { [weak self] in
+            await self?.connectSelectedProfile()
         }
     }
 
@@ -323,6 +340,8 @@ final class KodantoAppModel {
             connectionState = .connected(version: health.version)
             try await refreshAll(using: client, scope: .full)
             startLiveSync(for: profile)
+        } catch is CancellationError {
+            return
         } catch {
             connectionState = .failed(error.localizedDescription)
         }

@@ -17,7 +17,7 @@ struct ConnectionSheet: View {
             Form {
                 Picker("Connection Type", selection: $kind) {
                     Text("Local Sidecar").tag(ServerProfile.Kind.localSidecar)
-                    Text("Remote HTTP Server").tag(ServerProfile.Kind.remote)
+                    Text("Remote Connection").tag(ServerProfile.Kind.remote)
                 }
 
                 TextField("Name", text: $name)
@@ -30,7 +30,7 @@ struct ConnectionSheet: View {
                 SecureField("Password", text: $password)
                     .textFieldStyle(.roundedBorder)
 
-                Text(kind == .localSidecar ? "Kodanto will try this URL first, then launch `opencode serve` from your PATH." : "Use this for an already-running opencode server.")
+                Text(kind == .localSidecar ? "Kodanto will try this URL first, then launch `opencode serve` from your PATH." : "Use this for an already-running remote opencode server.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -52,7 +52,7 @@ struct ConnectionSheet: View {
                     onSave(
                         ServerProfile(
                             id: existingProfile?.id ?? UUID(),
-                            name: name.isEmpty ? defaultName : name,
+                            name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultName : name,
                             kind: kind,
                             baseURL: baseURL,
                             username: username.isEmpty ? "opencode" : username,
@@ -79,6 +79,6 @@ struct ConnectionSheet: View {
     }
 
     private var defaultName: String {
-        kind == .localSidecar ? "Local Sidecar" : "Remote Server"
+        ServerProfile.defaultName(for: kind, baseURL: baseURL)
     }
 }

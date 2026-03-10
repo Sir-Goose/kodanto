@@ -44,6 +44,60 @@ struct ServerProfile: Identifiable, Codable, Equatable, Hashable {
         URL(string: normalizedBaseURL)
     }
 
+    var connectionTypeLabel: String {
+        switch kind {
+        case .localSidecar:
+            return "Local Sidecar"
+        case .remote:
+            return "Remote Connection"
+        }
+    }
+
+    var connectionKindLabel: String {
+        switch kind {
+        case .localSidecar:
+            return "Local"
+        case .remote:
+            return "Remote"
+        }
+    }
+
+    var connectionIconName: String {
+        switch kind {
+        case .localSidecar:
+            return "desktopcomputer"
+        case .remote:
+            return "network"
+        }
+    }
+
+    var connectionDetail: String {
+        switch kind {
+        case .localSidecar:
+            return normalizedBaseURL
+        case .remote:
+            if let host = resolvedURL?.host, !host.isEmpty {
+                return host
+            }
+            return normalizedBaseURL
+        }
+    }
+
+    static func defaultName(for kind: Kind, baseURL: String) -> String {
+        switch kind {
+        case .localSidecar:
+            return "Local Sidecar"
+        case .remote:
+            let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedBaseURL.isEmpty else { return "Remote Connection" }
+            let withScheme = trimmedBaseURL.contains("://") ? trimmedBaseURL : "http://\(trimmedBaseURL)"
+            if let host = URL(string: withScheme)?.host, !host.isEmpty {
+                return host
+            }
+            return "Remote Connection"
+        }
+    }
+
     static let localDefault = ServerProfile(
         name: "Local Sidecar",
         kind: .localSidecar,

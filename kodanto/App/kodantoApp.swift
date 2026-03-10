@@ -16,6 +16,11 @@ struct kodantoApp: App {
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandMenu("View") {
+                Button("Connections...") {
+                    model.showingConnectionsManager = true
+                }
+                .keyboardShortcut(",", modifiers: [.command, .shift])
+
                 Button("Diagnostics") {
                     model.showingDiagnostics = true
                 }
