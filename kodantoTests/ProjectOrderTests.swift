@@ -134,6 +134,62 @@ final class ProjectOrderTests: XCTestCase {
         XCTAssertEqual(ordered.map(\.id), ["gamma", "alpha", "beta"])
     }
 
+    func testResolverDeduplicatesProjectsByWorktree() {
+        let projects = [
+            makeProject(id: "kodanto-a", worktree: "/tmp/kodanto", updatedAt: 10),
+            makeProject(id: "kodanto-b", worktree: "/tmp/kodanto/.", updatedAt: 30),
+            makeProject(id: "notes", worktree: "/tmp/notes", updatedAt: 20)
+        ]
+
+        let ordered = ProjectOrderResolver.orderedProjects(projects, storedIDs: [])
+
+        XCTAssertEqual(ordered.map(\.id), ["kodanto-b", "notes"])
+    }
+
+    func testResolverPrefersStoredProjectIDWhenDuplicateWorktreesExist() {
+        let projects = [
+            makeProject(id: "kodanto-a", worktree: "/tmp/kodanto", updatedAt: 10),
+            makeProject(id: "kodanto-b", worktree: "/tmp/kodanto", updatedAt: 30),
+            makeProject(id: "notes", worktree: "/tmp/notes", updatedAt: 20)
+        ]
+
+        let ordered = ProjectOrderResolver.orderedProjects(projects, storedIDs: ["kodanto-a", "notes"])
+
+        XCTAssertEqual(ordered.map(\.id), ["kodanto-a", "notes"])
+    }
+
+    func testDeduplicatedProjectsKeepsOriginalRelativeOrderWhenReplacingDuplicateIdentity() {
+        let projects = [
+            makeProject(id: "alpha", worktree: "/tmp/alpha", updatedAt: 40),
+            makeProject(id: "kodanto-old", worktree: "/tmp/kodanto", updatedAt: 10),
+            makeProject(id: "beta", worktree: "/tmp/beta", updatedAt: 30),
+            makeProject(id: "kodanto-new", worktree: "/tmp/kodanto/.", updatedAt: 50),
+            makeProject(id: "gamma", worktree: "/tmp/gamma", updatedAt: 20)
+        ]
+
+        let deduplicated = ProjectOrderResolver.deduplicatedProjects(projects)
+
+        XCTAssertEqual(deduplicated.map(\.id), ["alpha", "kodanto-new", "beta", "gamma"])
+    }
+
+    func testReorderedProjectsMovesDraggedProjectWithoutAffectingOthers() {
+        let projects = [
+            makeProject(id: "alpha", updatedAt: 40),
+            makeProject(id: "income-categoriser", updatedAt: 30),
+            makeProject(id: "beta", updatedAt: 20),
+            makeProject(id: "gamma", updatedAt: 10)
+        ]
+
+        let ordered = ProjectOrderResolver.reorderedProjects(
+            projects,
+            movingProjectID: "income-categoriser",
+            relativeTo: "gamma",
+            placement: .after
+        )
+
+        XCTAssertEqual(ordered.map(\.id), ["alpha", "beta", "gamma", "income-categoriser"])
+    }
+
     func testProjectOrderStorePersistsValuesPerProfile() {
         let suiteName = "ProjectOrderTests-\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
@@ -330,10 +386,10 @@ final class ProjectOrderTests: XCTestCase {
         )
     }
 
-    private func makeProject(id: String, updatedAt: Double) -> OpenCodeProject {
+    private func makeProject(id: String, worktree: String? = nil, updatedAt: Double) -> OpenCodeProject {
         OpenCodeProject(
             id: id,
-            worktree: "/tmp/\(id)",
+            worktree: worktree ?? "/tmp/\(id)",
             vcs: nil,
             name: id.capitalized,
             icon: nil,

@@ -273,9 +273,11 @@ final class KodantoAppModel {
 
     func sanitizeProjects() {
         let sanitizedProjects = resolvedProjectOrder(for: projects)
+        let previousProjects = projects
 
         if sanitizedProjects != projects {
             projects = sanitizedProjects
+            reconcileSelectedProject(previousProjects: previousProjects, updatedProjects: sanitizedProjects, selectingFirstProjectIfNeeded: true)
         }
 
         persistProjectOrder()
@@ -473,9 +475,11 @@ final class KodantoAppModel {
 
         let resolvedPathInfo = try await pathInfoTask
         let loadedProjects = resolvedProjectOrder(for: try await projectsTask)
+        let previousProjects = projects
 
         pathInfo = resolvedPathInfo
         projects = loadedProjects
+        reconcileSelectedProject(previousProjects: previousProjects, updatedProjects: loadedProjects, selectingFirstProjectIfNeeded: true)
         persistProjectOrder()
 
         if scope.includesModelCatalog {
@@ -485,10 +489,6 @@ final class KodantoAppModel {
                 modelLoadError = error.localizedDescription
                 isLoadingModels = false
             }
-        }
-
-        if selectedProjectID == nil || !loadedProjects.contains(where: { $0.id == selectedProjectID }) {
-            selectedProjectID = loadedProjects.first?.id
         }
 
         let projectsToRefresh = loadedProjects.filter { project in
@@ -717,6 +717,7 @@ final class KodantoAppModel {
 
     private func upsertProject(_ project: OpenCodeProject) {
         var updatedProjects = projects
+        let previousProjects = projects
 
         if let index = updatedProjects.firstIndex(where: { $0.id == project.id }) {
             updatedProjects[index] = project
@@ -725,6 +726,7 @@ final class KodantoAppModel {
         }
 
         projects = resolvedProjectOrder(for: updatedProjects)
+        reconcileSelectedProject(previousProjects: previousProjects, updatedProjects: projects, selectingFirstProjectIfNeeded: true)
         persistProjectOrder()
     }
 
@@ -929,6 +931,32 @@ final class KodantoAppModel {
 
     private func sortParts(_ lhs: OpenCodePart, _ rhs: OpenCodePart) -> Bool {
         lhs.id < rhs.id
+    }
+
+    private func reconcileSelectedProject(
+        previousProjects: [OpenCodeProject],
+        updatedProjects: [OpenCodeProject],
+        selectingFirstProjectIfNeeded: Bool
+    ) {
+        let previousSelection = selectedProjectID
+
+        if let selectedProjectID,
+           !updatedProjects.contains(where: { $0.id == selectedProjectID }),
+           let previousSelectedProject = previousProjects.first(where: { $0.id == selectedProjectID }),
+           let replacement = updatedProjects.first(where: {
+               ProjectOrderResolver.matchesProjectLocation($0.worktree, previousSelectedProject.worktree)
+           }) {
+            self.selectedProjectID = replacement.id
+        }
+
+        if selectingFirstProjectIfNeeded,
+           (selectedProjectID == nil || !updatedProjects.contains(where: { $0.id == selectedProjectID })) {
+            selectedProjectID = updatedProjects.first?.id
+        }
+
+        if previousSelection != selectedProjectID {
+            applySelectedProjectCache()
+        }
     }
 
     private func waitForServer(profile: ServerProfile) async throws {
@@ -1142,13 +1170,34 @@ enum ProjectOrderResolver {
         return projectIDs.filter { seenIDs.insert($0).inserted }
     }
 
-    static func deduplicatedProjects(_ projects: [OpenCodeProject]) -> [OpenCodeProject] {
-        var seenIDs: Set<OpenCodeProject.ID> = []
-        return projects.filter { seenIDs.insert($0.id).inserted }
+    static func matchesProjectLocation(_ lhs: String, _ rhs: String) -> Bool {
+        normalizedProjectLocation(lhs) == normalizedProjectLocation(rhs)
+    }
+
+    static func deduplicatedProjects(_ projects: [OpenCodeProject], preferredIDs: [String] = []) -> [OpenCodeProject] {
+        let storedIndexes = Dictionary(uniqueKeysWithValues: deduplicatedProjectIDs(preferredIDs).enumerated().map { ($1, $0) })
+        var bestProjectsByIdentity: [String: OpenCodeProject] = [:]
+        var orderedIdentities: [String] = []
+
+        for project in projects {
+            let identity = projectIdentity(for: project)
+
+            guard let existing = bestProjectsByIdentity[identity] else {
+                orderedIdentities.append(identity)
+                bestProjectsByIdentity[identity] = project
+                continue
+            }
+
+            if prefers(project, over: existing, storedIndexes: storedIndexes) {
+                bestProjectsByIdentity[identity] = project
+            }
+        }
+
+        return orderedIdentities.compactMap { bestProjectsByIdentity[$0] }
     }
 
     static func orderedProjects(_ projects: [OpenCodeProject], storedIDs: [String]) -> [OpenCodeProject] {
-        let orderedByRecency = deduplicatedProjects(projects).sorted { lhs, rhs in
+        let orderedByRecency = deduplicatedProjects(projects, preferredIDs: storedIDs).sorted { lhs, rhs in
             if lhs.time.updated != rhs.time.updated {
                 return lhs.time.updated > rhs.time.updated
             }
@@ -1205,6 +1254,43 @@ enum ProjectOrderResolver {
 
         reorderedProjects.insert(movedProject, at: max(0, min(insertionIndex, reorderedProjects.count)))
         return reorderedProjects
+    }
+
+    private static func projectIdentity(for project: OpenCodeProject) -> String {
+        let normalizedWorktree = normalizedProjectLocation(project.worktree)
+        if normalizedWorktree.isEmpty {
+            return "id:\(project.id)"
+        }
+
+        return "worktree:\(normalizedWorktree)"
+    }
+
+    private static func normalizedProjectLocation(_ location: String) -> String {
+        NSString(string: location).standardizingPath
+    }
+
+    private static func prefers(
+        _ candidate: OpenCodeProject,
+        over existing: OpenCodeProject,
+        storedIndexes: [String: Int]
+    ) -> Bool {
+        let candidateStoredIndex = storedIndexes[candidate.id]
+        let existingStoredIndex = storedIndexes[existing.id]
+
+        switch (candidateStoredIndex, existingStoredIndex) {
+        case let (candidateIndex?, existingIndex?) where candidateIndex != existingIndex:
+            return candidateIndex < existingIndex
+        case (_?, nil):
+            return true
+        case (nil, _?):
+            return false
+        default:
+            if candidate.time.updated != existing.time.updated {
+                return candidate.time.updated > existing.time.updated
+            }
+
+            return candidate.id.localizedCaseInsensitiveCompare(existing.id) == .orderedAscending
+        }
     }
 }
 
