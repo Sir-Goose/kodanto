@@ -1,34 +1,12 @@
-import AppKit
 import Foundation
 import Observation
 
 @MainActor
 @Observable
 final class KodantoAppModel {
-    struct SessionNavigationTarget: Hashable {
-        let projectID: OpenCodeProject.ID
-        let sessionID: OpenCodeSession.ID
-    }
-
-    struct DiagnosticsSnapshot {
-        let serverURL: String
-        let binaryPath: String
-        let liveSyncState: String
-        let reconnectCount: Int
-        let lastEventDescription: String
-        let lastError: String?
-        let selectedProjectDirectory: String?
-        let cachedProjects: Int
-        let cachedSessions: Int
-        let sidecarLog: String
-    }
-
-    enum ConnectionState: Equatable {
-        case idle
-        case connecting
-        case connected(version: String)
-        case failed(String)
-    }
+    typealias SessionNavigationTarget = KodantoSessionNavigationTarget
+    typealias DiagnosticsSnapshot = KodantoDiagnosticsSnapshot
+    typealias ConnectionState = KodantoConnectionState
 
     private enum RefreshScope {
         case full
@@ -53,76 +31,56 @@ final class KodantoAppModel {
     var profiles: [ServerProfile] = []
     var selectedProfileID: ServerProfile.ID?
     var connectionState: ConnectionState = .idle
-    var projects: [OpenCodeProject] = []
-    var selectedProjectID: OpenCodeProject.ID?
-    var sessions: [OpenCodeSession] = []
-    var selectedSessionID: OpenCodeSession.ID?
-    var selectedSessionMessages: [OpenCodeMessageEnvelope] = []
-    var selectedSessionTurns: [TranscriptTurn] = []
-    var selectedSessionTranscriptRevision = 0
-    var sessionTodos: [OpenCodeTodo] = []
-    var permissions: [OpenCodePermissionRequest] = []
-    var questions: [OpenCodeQuestionRequest] = []
-    var availableModelGroups: [OpenCodeModelProviderGroup] = []
-    var selectedModelID: String?
-    var selectedModelVariant: String?
-    var isLoadingModels = false
-    var modelLoadError: String?
     var pathInfo: OpenCodePathInfo?
-    var draftPrompt = ""
     var sidecarLog = ""
     var showingConnectionSheet = false
     var showingConnectionsManager = false
     var showingDiagnostics = false
-    var lastSSEError: String?
-    var loadingSessionDirectories: Set<String> = []
 
-    private let sidecar = SidecarProcess()
-    private let storage: ServerProfileStore
-    private let modelSelectionStore: ModelSelectionStore
-    private let modelVariantSelectionStore: ModelVariantSelectionStore
-    private let permissionAutoAcceptStore: PermissionAutoAcceptStore
-    private let projectOrderStore: ProjectOrderStore
-    private var globalEventTask: Task<Void, Never>?
-    private var heartbeatWatchdogTask: Task<Void, Never>?
+    let workspaceStore: WorkspaceStore
+    let sessionDetailStore: SessionDetailStore
+    let sessionRequestStore: SessionRequestStore
+    let composerStore: ComposerStore
+    let liveSyncCoordinator: LiveSyncCoordinator
+
+    private let dependencies: KodantoAppDependencies
     private var connectTask: Task<Void, Never>?
-    private var autoRespondingPermissionIDs: Set<String> = []
-    private var permissionAutoAcceptValues: [String: Bool]
-    private var liveSync = LiveSyncTracker()
-    private var sessionMessagesByID: [String: OpenCodeMessage] = [:]
-    private var messagePartsByMessageID: [String: [OpenCodePart]] = [:]
-    private var sessionsByDirectory: [String: [OpenCodeSession]] = [:]
-    private var sessionStatusesByDirectory: [String: [String: OpenCodeSessionStatus]] = [:]
-    private var sessionSidebarIndicators = SessionSidebarIndicatorStore()
 
-    private let reconnectDelay: Duration = .milliseconds(250)
+    convenience init(userDefaults: UserDefaults = .standard) {
+        self.init(dependencies: .live(userDefaults: userDefaults))
+    }
 
-    init(userDefaults: UserDefaults = .standard) {
-        storage = ServerProfileStore(userDefaults: userDefaults)
-        modelSelectionStore = ModelSelectionStore(userDefaults: userDefaults)
-        modelVariantSelectionStore = ModelVariantSelectionStore(userDefaults: userDefaults)
-        permissionAutoAcceptStore = PermissionAutoAcceptStore(userDefaults: userDefaults)
-        projectOrderStore = ProjectOrderStore(userDefaults: userDefaults)
-        permissionAutoAcceptValues = permissionAutoAcceptStore.load()
-        profiles = storage.load()
+    init(dependencies: KodantoAppDependencies) {
+        self.dependencies = dependencies
+        workspaceStore = WorkspaceStore(projectOrderStore: dependencies.projectOrderStore)
+        sessionDetailStore = SessionDetailStore()
+        sessionRequestStore = SessionRequestStore(permissionAutoAcceptStore: dependencies.permissionAutoAcceptStore)
+        composerStore = ComposerStore(
+            modelSelectionStore: dependencies.modelSelectionStore,
+            modelVariantSelectionStore: dependencies.modelVariantSelectionStore
+        )
+        liveSyncCoordinator = LiveSyncCoordinator(
+            apiFactory: dependencies.apiFactory,
+            sseStreamProvider: dependencies.sseStreamProvider,
+            clock: dependencies.clock
+        )
+
+        profiles = dependencies.profileStore.load()
         if profiles.isEmpty {
             let local = Self.makeLocalProfile()
             profiles = [local]
             selectedProfileID = local.id
-            storage.save(profiles)
+            dependencies.profileStore.save(profiles)
         } else {
             selectedProfileID = profiles.first?.id
         }
-        selectedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
-        if let profileID = selectedProfileID, let selectedModelID {
-            selectedModelVariant = modelVariantSelectionStore.load(for: profileID, modelID: selectedModelID)
-        }
 
-        sidecar.setOutputHandler { [weak self] line in
-            guard let self else { return }
-            self.sidecarLog.append(line)
-            if self.sidecarLog.count > 12000 {
-                self.sidecarLog = String(self.sidecarLog.suffix(12000))
+        composerStore.updateSelectedProfile(selectedProfileID)
+        syncSelectionContext(resetSessionState: true)
+
+        dependencies.sidecar.setOutputHandler { [weak self] line in
+            Task { @MainActor in
+                self?.appendSidecarLog(line)
             }
         }
     }
@@ -131,65 +89,113 @@ final class KodantoAppModel {
         profiles.first(where: { $0.id == selectedProfileID })
     }
 
+    var projects: [OpenCodeProject] {
+        workspaceStore.projects
+    }
+
+    var selectedProjectID: OpenCodeProject.ID? {
+        workspaceStore.selectedProjectID
+    }
+
     var selectedProject: OpenCodeProject? {
-        projects.first(where: { $0.id == selectedProjectID })
+        workspaceStore.selectedProject
+    }
+
+    var sessions: [OpenCodeSession] {
+        workspaceStore.sessions
+    }
+
+    var selectedSessionID: OpenCodeSession.ID? {
+        workspaceStore.selectedSessionID
     }
 
     var selectedSession: OpenCodeSession? {
-        sessions.first(where: { $0.id == selectedSessionID })
+        workspaceStore.selectedSession
+    }
+
+    var selectedSessionMessages: [OpenCodeMessageEnvelope] {
+        sessionDetailStore.selectedSessionMessages
+    }
+
+    var selectedSessionTurns: [TranscriptTurn] {
+        sessionDetailStore.selectedSessionTurns
+    }
+
+    var selectedSessionTranscriptRevision: Int {
+        sessionDetailStore.selectedSessionTranscriptRevision
+    }
+
+    var sessionTodos: [OpenCodeTodo] {
+        sessionDetailStore.sessionTodos
+    }
+
+    var permissions: [OpenCodePermissionRequest] {
+        sessionRequestStore.permissions
+    }
+
+    var questions: [OpenCodeQuestionRequest] {
+        sessionRequestStore.questions
+    }
+
+    var availableModelGroups: [OpenCodeModelProviderGroup] {
+        composerStore.availableModelGroups
+    }
+
+    var selectedModelID: String? {
+        composerStore.selectedModelID
+    }
+
+    var selectedModelVariant: String? {
+        composerStore.selectedModelVariant
+    }
+
+    var isLoadingModels: Bool {
+        composerStore.isLoadingModels
+    }
+
+    var modelLoadError: String? {
+        composerStore.modelLoadError
+    }
+
+    var draftPrompt: String {
+        get { composerStore.draftPrompt }
+        set { composerStore.draftPrompt = newValue }
     }
 
     var activePermissionRequest: OpenCodePermissionRequest? {
-        guard !isPermissionAutoAcceptEnabled else { return nil }
-        guard let selectedSessionID else { return nil }
-        return permissions.first(where: { $0.sessionID == selectedSessionID })
+        sessionRequestStore.activePermissionRequest
     }
 
     var activeQuestionRequest: OpenCodeQuestionRequest? {
-        guard let selectedSessionID else { return nil }
-        return questions.first(where: { $0.sessionID == selectedSessionID })
+        sessionRequestStore.activeQuestionRequest
     }
 
     var isPermissionAutoAcceptEnabled: Bool {
-        guard let key = selectedPermissionAutoAcceptKey else { return false }
-        return permissionAutoAcceptValues[key] ?? false
+        sessionRequestStore.isPermissionAutoAcceptEnabled
     }
 
     var canTogglePermissionAutoAccept: Bool {
-        selectedProject != nil && selectedSession != nil
+        sessionRequestStore.canTogglePermissionAutoAccept
     }
 
     func loadedSessionNavigationTarget(for sessionID: OpenCodeSession.ID) -> SessionNavigationTarget? {
-        guard let location = SessionNavigationTargetResolver.resolve(
-            sessionID: sessionID,
-            projects: projects,
-            sessionsByDirectory: sessionsByDirectory
-        ) else { return nil }
-
-        return SessionNavigationTarget(projectID: location.projectID, sessionID: location.sessionID)
+        workspaceStore.loadedSessionNavigationTarget(for: sessionID)
     }
 
     var selectedModel: OpenCodeModelOption? {
-        availableModelGroups
-            .flatMap(\.models)
-            .first(where: { $0.id == selectedModelID })
+        composerStore.selectedModel
     }
 
     var selectedModelSelection: PromptRequestBody.ModelSelection? {
-        selectedModel.map {
-            PromptRequestBody.ModelSelection(providerID: $0.providerID, modelID: $0.modelID)
-        }
+        composerStore.selectedModelSelection
     }
 
     var selectedModelVariants: [String] {
-        selectedModel?.variants ?? []
+        composerStore.selectedModelVariants
     }
 
     var selectedPromptVariant: String? {
-        guard let selectedModel else { return nil }
-        guard let selectedModelVariant else { return nil }
-        guard selectedModel.variants.contains(selectedModelVariant) else { return nil }
-        return selectedModelVariant
+        composerStore.selectedPromptVariant
     }
 
     var canCreateSession: Bool {
@@ -214,42 +220,34 @@ final class KodantoAppModel {
     }
 
     var isLiveSyncActive: Bool {
-        liveSync.state.isRunning
+        liveSyncCoordinator.isActive
     }
 
     var liveSyncPhase: LiveSyncTracker.State {
-        liveSync.state
+        liveSyncCoordinator.state
     }
 
     var reconnectCount: Int {
-        liveSync.reconnectCount
+        liveSyncCoordinator.reconnectCount
     }
 
     var isSelectedSessionRunning: Bool {
-        guard let selectedProject, let selectedSessionID else { return false }
-        guard let status = sessionStatusesByDirectory[selectedProject.worktree]?[selectedSessionID] else {
-            return false
-        }
-
-        switch status {
-        case .busy, .retry:
-            return true
-        case .idle:
-            return false
-        }
+        workspaceStore.isSelectedSessionRunning
     }
 
     var diagnostics: DiagnosticsSnapshot {
         DiagnosticsSnapshot(
             serverURL: selectedProfile?.normalizedBaseURL ?? "Not configured",
-            binaryPath: (try? SidecarProcess.executablePath()) ?? "Not found",
-            liveSyncState: liveSync.state.label,
+            binaryPath: (try? dependencies.sidecar.executablePath()) ?? "Not found",
+            liveSyncState: liveSyncCoordinator.state.label,
             reconnectCount: reconnectCount,
-            lastEventDescription: liveSync.lastEventAt == .distantPast ? "No events yet" : RelativeDateTimeFormatter().localizedString(for: liveSync.lastEventAt, relativeTo: .now),
-            lastError: lastSSEError,
-            selectedProjectDirectory: selectedProject?.worktree,
-            cachedProjects: sessionsByDirectory.keys.count,
-            cachedSessions: sessionsByDirectory.values.reduce(0) { $0 + $1.count },
+            lastEventDescription: liveSyncCoordinator.lastEventAt == .distantPast
+                ? "No events yet"
+                : RelativeDateTimeFormatter().localizedString(for: liveSyncCoordinator.lastEventAt, relativeTo: .now),
+            lastError: liveSyncCoordinator.lastSSEError,
+            selectedProjectDirectory: workspaceStore.selectedProjectDirectory,
+            cachedProjects: workspaceStore.cachedProjectCount,
+            cachedSessions: workspaceStore.cachedSessionCount,
             sidecarLog: sidecarLog
         )
     }
@@ -258,33 +256,13 @@ final class KodantoAppModel {
         guard forceReset || selectedProfileID != profileID else { return }
         connectTask?.cancel()
         stopLiveSync()
+
         selectedProfileID = profileID
-        selectedModelID = modelSelectionStore.load(for: profileID)
-        if let selectedModelID {
-            selectedModelVariant = modelVariantSelectionStore.load(for: profileID, modelID: selectedModelID)
-        } else {
-            selectedModelVariant = nil
-        }
+        composerStore.updateSelectedProfile(profileID)
         connectionState = .idle
-        projects = []
-        selectedProjectID = nil
-        sessions = []
-        selectedSessionID = nil
-        clearSelectedSessionTranscript()
-        sessionTodos = []
-        permissions = []
-        questions = []
-        availableModelGroups = []
-        isLoadingModels = false
-        modelLoadError = nil
         pathInfo = nil
-        lastSSEError = nil
-        liveSync = LiveSyncTracker()
-        sessionsByDirectory = [:]
-        sessionStatusesByDirectory = [:]
-        sessionSidebarIndicators.reset()
-        loadingSessionDirectories = []
-        resetMessageCaches()
+        workspaceStore.reset()
+        syncSelectionContext(resetSessionState: true)
     }
 
     func saveProfile(_ profile: ServerProfile, selectAfterSave: Bool = true) {
@@ -302,7 +280,7 @@ final class KodantoAppModel {
         } else {
             profiles.append(profile)
         }
-        storage.save(profiles)
+        dependencies.profileStore.save(profiles)
 
         if shouldResetSelection {
             selectProfile(profile.id, forceReset: true)
@@ -318,10 +296,10 @@ final class KodantoAppModel {
             : nil
 
         profiles.removeAll { $0.id == profile.id }
-        modelSelectionStore.remove(for: profile.id)
-        modelVariantSelectionStore.remove(for: profile.id)
-        projectOrderStore.remove(for: profile.id)
-        storage.save(profiles)
+        dependencies.modelSelectionStore.remove(for: profile.id)
+        dependencies.modelVariantSelectionStore.remove(for: profile.id)
+        dependencies.projectOrderStore.remove(for: profile.id)
+        dependencies.profileStore.save(profiles)
 
         if let fallbackProfileID {
             selectProfile(fallbackProfileID, forceReset: true)
@@ -329,40 +307,15 @@ final class KodantoAppModel {
     }
 
     func selectModel(_ modelID: String) {
-        selectedModelID = modelID
-        guard let profileID = selectedProfileID else { return }
-        modelSelectionStore.save(modelID, for: profileID)
-        if let option = availableModelGroups.flatMap(\.models).first(where: { $0.id == modelID }) {
-            let storedVariant = modelVariantSelectionStore.load(for: profileID, modelID: modelID)
-            selectedModelVariant = resolvedModelVariantSelection(storedVariant, availableVariants: option.variants)
-        } else {
-            selectedModelVariant = nil
-        }
+        composerStore.selectModel(modelID)
     }
 
     func selectModelVariant(_ variant: String?) {
-        let normalizedVariant = resolvedModelVariantSelection(variant, availableVariants: selectedModelVariants)
-        selectedModelVariant = normalizedVariant
-
-        guard let profileID = selectedProfileID, let selectedModelID else { return }
-        if let normalizedVariant {
-            modelVariantSelectionStore.save(normalizedVariant, for: profileID, modelID: selectedModelID)
-        } else {
-            modelVariantSelectionStore.remove(for: profileID, modelID: selectedModelID)
-        }
+        composerStore.selectModelVariant(variant)
     }
 
     func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int) {
-        guard projects.count > 1 else { return }
-
-        var reorderedProjects = projects
-        reorderedProjects.moveItems(fromOffsets: source, toOffset: destination)
-        reorderedProjects = ProjectOrderResolver.deduplicatedProjects(reorderedProjects)
-
-        guard reorderedProjects != projects else { return }
-
-        projects = reorderedProjects
-        persistProjectOrder()
+        workspaceStore.moveProjects(fromOffsets: source, toOffset: destination, profileID: selectedProfileID)
     }
 
     func moveProject(
@@ -370,29 +323,17 @@ final class KodantoAppModel {
         relativeTo targetProjectID: OpenCodeProject.ID,
         placement: ProjectDropPlacement
     ) {
-        let reorderedProjects = ProjectOrderResolver.reorderedProjects(
-            projects,
-            movingProjectID: projectID,
+        workspaceStore.moveProject(
+            projectID,
             relativeTo: targetProjectID,
-            placement: placement
+            placement: placement,
+            profileID: selectedProfileID
         )
-
-        guard reorderedProjects != projects else { return }
-
-        projects = reorderedProjects
-        persistProjectOrder()
     }
 
     func sanitizeProjects() {
-        let sanitizedProjects = resolvedProjectOrder(for: projects)
-        let previousProjects = projects
-
-        if sanitizedProjects != projects {
-            projects = sanitizedProjects
-            reconcileSelectedProject(previousProjects: previousProjects, updatedProjects: sanitizedProjects, selectingFirstProjectIfNeeded: true)
-        }
-
-        persistProjectOrder()
+        workspaceStore.sanitizeProjects(profileID: selectedProfileID)
+        syncSelectionContext(resetSessionState: false)
     }
 
     func connect() {
@@ -408,20 +349,20 @@ final class KodantoAppModel {
         stopLiveSync()
 
         do {
-            let client = OpenCodeAPIClient(profile: profile)
+            let client = dependencies.apiFactory.makeService(profile: profile)
 
             if profile.kind == .localSidecar {
-                let installedVersion = try? SidecarProcess.executableVersion()
+                let installedVersion = try? dependencies.sidecar.executableVersion()
 
                 if let health = try? await client.health(), health.healthy {
                     if let installedVersion,
-                       !SidecarProcess.versionsMatch(health.version, installedVersion) {
-                        sidecarLog.append("Restarting local sidecar to use installed opencode \(installedVersion) instead of running \(health.version).\n")
-                        try await sidecar.restart(profile: profile)
+                       !dependencies.sidecar.versionsMatch(health.version, installedVersion) {
+                        appendSidecarLog("Restarting local sidecar to use installed opencode \(installedVersion) instead of running \(health.version).\n")
+                        try await dependencies.sidecar.restart(profile: profile)
                         try await waitForServer(profile: profile)
                     }
                 } else {
-                    try await sidecar.restart(profile: profile)
+                    try await dependencies.sidecar.restart(profile: profile)
                     try await waitForServer(profile: profile)
                 }
             }
@@ -442,7 +383,7 @@ final class KodantoAppModel {
             guard let profile = selectedProfile else { return }
             guard canRefresh else { return }
             do {
-                try await refreshAll(using: OpenCodeAPIClient(profile: profile), scope: .full)
+                try await refreshAll(using: dependencies.apiFactory.makeService(profile: profile), scope: .full)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -450,30 +391,28 @@ final class KodantoAppModel {
     }
 
     func sessions(for project: OpenCodeProject) -> [OpenCodeSession] {
-        sessionsByDirectory[project.worktree] ?? []
+        workspaceStore.sessions(for: project)
     }
 
     func sessionSidebarIndicator(for session: OpenCodeSession, in project: OpenCodeProject) -> SessionSidebarIndicatorState {
-        sessionSidebarIndicators.indicator(for: session.id, in: project.worktree)
+        workspaceStore.sessionSidebarIndicator(for: session, in: project)
     }
 
     func hasLoadedSessions(for project: OpenCodeProject) -> Bool {
-        sessionsByDirectory[project.worktree] != nil
+        workspaceStore.hasLoadedSessions(for: project)
     }
 
     func isLoadingSessions(for project: OpenCodeProject) -> Bool {
-        loadingSessionDirectories.contains(project.worktree)
+        workspaceStore.isLoadingSessions(for: project)
     }
 
     func loadSessionsIfNeeded(for project: OpenCodeProject) {
-        guard sessionsByDirectory[project.worktree] == nil,
-              !loadingSessionDirectories.contains(project.worktree)
-        else { return }
+        guard !workspaceStore.hasLoadedSessions(for: project), !workspaceStore.isLoadingSessions(for: project) else { return }
 
         Task {
             guard let profile = selectedProfile else { return }
             do {
-                try await loadSessions(for: project, using: OpenCodeAPIClient(profile: profile))
+                try await loadSessions(for: project, using: dependencies.apiFactory.makeService(profile: profile))
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -482,15 +421,16 @@ final class KodantoAppModel {
 
     func createSession(in projectID: OpenCodeProject.ID) {
         Task {
-            guard let profile = selectedProfile, let project = project(for: projectID) else { return }
-            selectedProjectID = project.id
-            applySelectedProjectCache()
+            guard let profile = selectedProfile, let project = projects.first(where: { $0.id == projectID }) else { return }
+            workspaceStore.selectProject(project.id)
+            syncSelectionContext(resetSessionState: false)
 
             do {
-                let client = OpenCodeAPIClient(profile: profile)
+                let client = dependencies.apiFactory.makeService(profile: profile)
                 let created = try await client.createSession(directory: project.worktree, title: nil)
                 try await loadSessions(for: project, using: client)
-                selectedSessionID = created.id
+                let didSwitch = workspaceStore.selectSession(created.id, in: project.id)
+                syncSelectionContext(resetSessionState: didSwitch)
                 try await loadSessionDetail(using: client)
             } catch {
                 connectionState = .failed(error.localizedDescription)
@@ -501,50 +441,30 @@ final class KodantoAppModel {
     func sendPrompt() {
         Task {
             guard let profile = selectedProfile, let project = selectedProject, let session = selectedSession else { return }
-            let text = draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { return }
-            draftPrompt = ""
 
             do {
-                let client = OpenCodeAPIClient(profile: profile)
-                try await client.sendPrompt(
-                    sessionID: session.id,
-                    directory: project.worktree,
-                    text: text,
-                    model: selectedModelSelection,
-                    variant: selectedPromptVariant
-                )
-                try await loadSessionDetail(using: client)
-                try await loadSessions(for: project, using: client)
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await composerStore.submitPrompt(using: client, project: project, session: session) {
+                    try await self.loadSessionDetail(using: client)
+                    try await self.loadSessions(for: project, using: client)
+                }
             } catch {
-                draftPrompt = text
                 connectionState = .failed(error.localizedDescription)
             }
         }
     }
 
     func selectSession(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
-        guard let profile = selectedProfile, let project = project(for: projectID) else { return }
+        guard selectedProfile != nil else { return }
+        let didSwitch = workspaceStore.selectSession(sessionID, in: projectID)
+        syncSelectionContext(resetSessionState: didSwitch)
 
-        let isSwitchingSessions = selectedSessionID != sessionID || selectedProjectID != project.id
-        selectedProjectID = project.id
-        applySelectedProjectCache()
-        selectedSessionID = sessionID
-        sessionSidebarIndicators.clearIndicator(for: sessionID, in: project.worktree)
-
-        if isSwitchingSessions {
-            resetMessageCaches()
-            clearSelectedSessionTranscript()
-            selectedSessionTranscriptRevision &+= 1
-            sessionTodos = []
-            permissions = []
-            questions = []
-        }
+        guard let profile = selectedProfile, let project = selectedProject else { return }
 
         Task {
             do {
-                let client = OpenCodeAPIClient(profile: profile)
-                if sessionsByDirectory[project.worktree] == nil {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                if !workspaceStore.hasLoadedSessions(for: project) {
                     try await loadSessions(for: project, using: client)
                 } else {
                     try await loadSessionDetail(using: client)
@@ -555,12 +475,10 @@ final class KodantoAppModel {
         }
     }
 
-    func respondToPermission(_ request: OpenCodePermissionRequest, reply: String) {
+    func respondToPermission(_ request: OpenCodePermissionRequest, reply: PermissionReply) {
         Task {
-            guard let profile = selectedProfile, let project = selectedProject else { return }
             do {
-                let client = OpenCodeAPIClient(profile: profile)
-                try await replyToPermission(request, reply: reply, using: client, directory: project.worktree)
+                try await submitPermissionResponse(request, reply: reply)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -568,30 +486,33 @@ final class KodantoAppModel {
     }
 
     func togglePermissionAutoAccept() {
-        setPermissionAutoAccept(!isPermissionAutoAcceptEnabled)
+        sessionRequestStore.togglePermissionAutoAccept()
+        autoRespondToPendingPermissionsIfNeeded()
     }
 
     func setPermissionAutoAccept(_ enabled: Bool) {
-        guard let key = selectedPermissionAutoAcceptKey else { return }
-        permissionAutoAcceptValues[key] = enabled
-        permissionAutoAcceptStore.save(permissionAutoAcceptValues)
-
+        sessionRequestStore.setPermissionAutoAccept(enabled)
         if enabled {
             autoRespondToPendingPermissionsIfNeeded()
         }
     }
 
-    func submitPermissionResponse(_ request: OpenCodePermissionRequest, reply: String) async throws {
-        let (client, directory) = try selectedPermissionActionContext()
-        try await replyToPermission(request, reply: reply, using: client, directory: directory)
+    func submitPermissionResponse(_ request: OpenCodePermissionRequest, reply: PermissionReply) async throws {
+        let (client, directory) = try selectedActionContext()
+        try await sessionRequestStore.submitPermissionResponse(
+            request,
+            reply: reply,
+            using: client,
+            directory: directory
+        ) {
+            try await self.loadSessionDetail(using: client)
+        }
     }
 
     func answerQuestion(_ request: OpenCodeQuestionRequest, answers: [[String]]) {
         Task {
-            guard let profile = selectedProfile, let project = selectedProject else { return }
             do {
-                let client = OpenCodeAPIClient(profile: profile)
-                try await answerQuestion(request, answers: answers, using: client, directory: project.worktree)
+                try await submitQuestionAnswers(request, answers: answers)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -600,10 +521,8 @@ final class KodantoAppModel {
 
     func rejectQuestion(_ request: OpenCodeQuestionRequest) {
         Task {
-            guard let profile = selectedProfile, let project = selectedProject else { return }
             do {
-                let client = OpenCodeAPIClient(profile: profile)
-                try await rejectQuestion(request, using: client, directory: project.worktree)
+                try await submitQuestionRejection(request)
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -611,1067 +530,215 @@ final class KodantoAppModel {
     }
 
     func submitQuestionAnswers(_ request: OpenCodeQuestionRequest, answers: [[String]]) async throws {
-        let (client, directory) = try selectedQuestionActionContext()
-        try await answerQuestion(request, answers: answers, using: client, directory: directory)
+        let (client, directory) = try selectedActionContext()
+        try await sessionRequestStore.submitQuestionAnswers(
+            request,
+            answers: answers,
+            using: client,
+            directory: directory
+        ) {
+            try await self.loadSessionDetail(using: client)
+        }
     }
 
     func submitQuestionRejection(_ request: OpenCodeQuestionRequest) async throws {
-        let (client, directory) = try selectedQuestionActionContext()
-        try await rejectQuestion(request, using: client, directory: directory)
+        let (client, directory) = try selectedActionContext()
+        try await sessionRequestStore.submitQuestionRejection(
+            request,
+            using: client,
+            directory: directory
+        ) {
+            try await self.loadSessionDetail(using: client)
+        }
     }
 
-    private func selectedPermissionActionContext() throws -> (client: OpenCodeAPIClient, directory: String) {
+    private func selectedActionContext() throws -> (client: OpenCodeAPIService, directory: String) {
         guard let profile = selectedProfile, let project = selectedProject, selectedSession != nil else {
             throw RequestActionError.missingSelection
         }
 
-        return (OpenCodeAPIClient(profile: profile), project.worktree)
+        return (dependencies.apiFactory.makeService(profile: profile), project.worktree)
     }
 
-    private func selectedQuestionActionContext() throws -> (client: OpenCodeAPIClient, directory: String) {
-        guard let profile = selectedProfile, let project = selectedProject, selectedSession != nil else {
-            throw RequestActionError.missingSelection
-        }
-
-        return (OpenCodeAPIClient(profile: profile), project.worktree)
-    }
-
-    private func refreshAll(using client: OpenCodeAPIClient, scope: RefreshScope) async throws {
+    private func refreshAll(using client: OpenCodeAPIService, scope: RefreshScope) async throws {
         async let pathInfoTask = client.pathInfo(directory: nil)
         async let projectsTask = client.projects()
 
-        let resolvedPathInfo = try await pathInfoTask
-        let loadedProjects = resolvedProjectOrder(for: try await projectsTask)
-        let previousProjects = projects
-
-        pathInfo = resolvedPathInfo
-        projects = loadedProjects
-        reconcileSelectedProject(previousProjects: previousProjects, updatedProjects: loadedProjects, selectingFirstProjectIfNeeded: true)
-        persistProjectOrder()
+        pathInfo = try await pathInfoTask
+        workspaceStore.applyLoadedProjects(try await projectsTask, profileID: selectedProfileID)
+        syncSelectionContext(resetSessionState: false)
 
         if scope.includesModelCatalog {
             do {
-                try await refreshModelCatalog(using: client)
+                try await composerStore.refreshModelCatalog(using: client)
             } catch {
-                modelLoadError = error.localizedDescription
-                isLoadingModels = false
+                composerStore.modelLoadError = error.localizedDescription
             }
         }
 
-        let projectsToRefresh = loadedProjects.filter { project in
-            project.id == selectedProjectID || sessionsByDirectory[project.worktree] != nil
+        let projectsToRefresh = projects.filter { project in
+            project.id == selectedProjectID || workspaceStore.hasLoadedSessions(for: project)
         }
 
         if projectsToRefresh.isEmpty {
-            sessions = []
-            selectedSessionID = nil
-            clearSelectedSessionTranscript()
-            sessionTodos = []
-            permissions = []
-            questions = []
-            resetMessageCaches()
+            workspaceStore.clearSelectedSession()
+            syncSelectionContext(resetSessionState: true)
         } else {
-            applySelectedProjectCache()
             for project in projectsToRefresh {
                 try await loadSessions(for: project, using: client)
             }
         }
     }
 
-    private func loadSessions(for project: OpenCodeProject, using client: OpenCodeAPIClient) async throws {
-        loadingSessionDirectories.insert(project.worktree)
-        defer { loadingSessionDirectories.remove(project.worktree) }
+    private func loadSessions(for project: OpenCodeProject, using client: OpenCodeAPIService) async throws {
+        workspaceStore.beginLoadingSessions(for: project)
+        defer { workspaceStore.finishLoadingSessions(for: project) }
 
         async let sessionsTask = client.sessions(directory: project.worktree)
         async let statusesTask = client.sessionStatuses(directory: project.worktree)
 
-        let loadedSessions = try await sessionsTask.sorted { $0.time.updated > $1.time.updated }
+        let loadedSessions = try await sessionsTask
         let loadedStatuses = try await statusesTask
+        let previousSelectedSessionID = selectedSessionID
 
-        let previousStatuses = sessionStatusesByDirectory[project.worktree] ?? [:]
-
-        sessionsByDirectory[project.worktree] = loadedSessions
-        sessionStatusesByDirectory[project.worktree] = loadedStatuses
-        sessionSidebarIndicators.applyStatusMap(
-            loadedStatuses,
-            previousStatuses: previousStatuses,
-            sessionIDs: loadedSessions.map(\.id),
-            in: project.worktree,
-            selectedSessionID: selectedSessionID,
-            isSelectedDirectory: selectedProjectID == project.id
-        )
-
-        guard selectedProjectID == project.id else { return }
-
-        applySelectedProjectCache()
-
-        if selectedSessionID == nil || !loadedSessions.contains(where: { $0.id == selectedSessionID }) {
-            selectedSessionID = loadedSessions.first?.id
-            if let selectedSessionID {
-                sessionSidebarIndicators.clearIndicator(for: selectedSessionID, in: project.worktree)
-            }
+        workspaceStore.applyLoadedSessions(loadedSessions, statuses: loadedStatuses, for: project)
+        let didSwitch = previousSelectedSessionID != selectedSessionID
+        if didSwitch {
+            syncSelectionContext(resetSessionState: true)
+        } else {
+            syncSelectionContext(resetSessionState: false)
         }
 
+        guard selectedProjectID == project.id else { return }
         try await loadSessionDetail(using: client)
     }
 
-    private func loadSessionDetail(using client: OpenCodeAPIClient) async throws {
+    private func loadSessionDetail(using client: OpenCodeAPIService) async throws {
         guard let project = selectedProject else {
-            clearSelectedSessionTranscript()
-            sessionTodos = []
-            permissions = []
-            questions = []
+            syncSelectionContext(resetSessionState: true)
             return
         }
 
         let selectedSessionID = self.selectedSessionID
         let directory = project.worktree
+        sessionRequestStore.updateSelection(sessionID: selectedSessionID, directory: directory)
 
-        async let permissionsTask = client.permissions(directory: project.worktree)
-        async let questionsTask = client.questions(directory: project.worktree)
+        async let permissionsTask = client.permissions(directory: directory)
+        async let questionsTask = client.questions(directory: directory)
 
         let loadedPermissions = try await permissionsTask
         let loadedQuestions = try await questionsTask
 
         guard selectedProject?.worktree == directory, self.selectedSessionID == selectedSessionID else { return }
 
-        permissions = loadedPermissions.filter { $0.sessionID == selectedSessionID }
-        questions = loadedQuestions.filter { $0.sessionID == selectedSessionID }
+        sessionRequestStore.replaceRequests(permissions: loadedPermissions, questions: loadedQuestions)
         autoRespondToPendingPermissionsIfNeeded()
 
         guard let session = selectedSession else {
-            resetMessageCaches()
-            clearSelectedSessionTranscript()
-            sessionTodos = []
+            sessionDetailStore.clearSessionDetail()
             return
         }
 
-        async let messagesTask = client.messages(sessionID: session.id, directory: project.worktree)
-        async let todosTask = client.sessionTodos(sessionID: session.id, directory: project.worktree)
+        async let messagesTask = client.messages(sessionID: session.id, directory: directory)
+        async let todosTask = client.sessionTodos(sessionID: session.id, directory: directory)
 
         let loadedMessages = try await messagesTask
         let loadedTodos = try await todosTask
 
         guard selectedProject?.worktree == directory, self.selectedSessionID == selectedSessionID else { return }
 
-        replaceMessages(loadedMessages)
-        sessionTodos = loadedTodos
+        sessionDetailStore.replaceMessages(loadedMessages)
+        sessionDetailStore.replaceSessionTodos(loadedTodos)
     }
 
     private func startLiveSync(for profile: ServerProfile) {
-        globalEventTask?.cancel()
-        heartbeatWatchdogTask?.cancel()
-        liveSync.start()
-        lastSSEError = nil
-
-        globalEventTask = Task { [weak self] in
-            guard let self else { return }
-            let client = OpenCodeAPIClient(profile: profile)
-
-            while !Task.isCancelled {
-                do {
-                    let sse = OpenCodeSSEClient(profile: profile)
-                    startHeartbeatWatchdog(for: profile)
-
-                    for try await event in sse.streamGlobalEvents() {
-                        if Task.isCancelled { return }
-                        let shouldRefresh = liveSync.receiveEvent(event)
-                        if shouldRefresh {
-                            try await refreshAll(using: client, scope: .liveData)
-                        }
-                        applyGlobalEvent(event)
-                    }
-
-                    if !Task.isCancelled {
-                        markLiveSyncReconnectNeeded("Live sync stream ended. Reconnecting...")
-                    }
-                } catch is CancellationError {
-                    return
-                } catch {
-                    if Task.isCancelled { return }
-                    markLiveSyncReconnectNeeded(error.localizedDescription)
-                }
-
-                stopHeartbeatWatchdog()
-                if Task.isCancelled { return }
-                liveSync.start()
-                try? await Task.sleep(for: reconnectDelay)
+        liveSyncCoordinator.start(
+            for: profile,
+            refresh: { [weak self] client in
+                guard let self else { return }
+                try await self.refreshAll(using: client, scope: .liveData)
+            },
+            handleEvent: { [weak self] event in
+                self?.applyGlobalEvent(event)
             }
-        }
+        )
     }
 
     private func stopLiveSync() {
-        globalEventTask?.cancel()
-        globalEventTask = nil
-        stopHeartbeatWatchdog()
-        liveSync.stop()
-    }
-
-    private func startHeartbeatWatchdog(for profile: ServerProfile) {
-        heartbeatWatchdogTask?.cancel()
-        heartbeatWatchdogTask = Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                if Task.isCancelled { return }
-                guard liveSync.state.isRunning else { continue }
-                guard liveSync.isHeartbeatTimedOut() else { continue }
-                markLiveSyncReconnectNeeded("Heartbeat timed out")
-                globalEventTask?.cancel()
-                startLiveSync(for: profile)
-                return
-            }
-        }
-    }
-
-    private func stopHeartbeatWatchdog() {
-        heartbeatWatchdogTask?.cancel()
-        heartbeatWatchdogTask = nil
-    }
-
-    private func markLiveSyncReconnectNeeded(_ reason: String) {
-        lastSSEError = reason
-        liveSync.markReconnectNeeded(reason: reason)
+        liveSyncCoordinator.stop()
     }
 
     private func applyGlobalEvent(_ event: OpenCodeGlobalEvent) {
-        let directory = event.directory ?? "global"
-
-        switch event.payload {
-        case .serverConnected:
-            break
-        case .serverHeartbeat:
-            break
-        case .globalDisposed:
-            refresh()
-        case .projectUpdated(let project):
-            upsertProject(project)
-        default:
-            applyDirectoryEvent(event.payload, directory: directory)
-        }
-    }
-
-    private func applyDirectoryEvent(_ event: OpenCodeEvent, directory: String) {
-        switch event {
-        case .sessionCreated(let payload):
-            upsertSession(payload.info, directory: directory)
-        case .sessionUpdated(let payload):
-            upsertSession(payload.info, directory: directory)
-        case .sessionDeleted(let payload):
-            removeSession(payload.info, directory: directory)
-        case .sessionStatus(let payload):
-            upsertSessionStatus(payload.status, sessionID: payload.sessionID, directory: directory)
-        case .todoUpdated(let payload):
-            guard directoryMatchesSelection(directory), payload.sessionID == selectedSessionID else { return }
-            sessionTodos = payload.todos
-        case .messageUpdated(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            upsertMessage(payload.info)
-        case .messageRemoved(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            removeMessage(sessionID: payload.sessionID, messageID: payload.messageID)
-        case .messagePartUpdated(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            upsertPart(payload.part)
-        case .messagePartDelta(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            applyPartDelta(payload)
-        case .messagePartRemoved(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            removePart(messageID: payload.messageID, partID: payload.partID)
-        case .permissionAsked(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            upsertPermission(payload)
-        case .permissionReplied(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            removePermission(sessionID: payload.sessionID, requestID: payload.requestID)
-        case .questionAsked(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            upsertQuestion(payload)
-        case .questionReplied(let payload), .questionRejected(let payload):
-            guard directoryMatchesSelection(directory) else { return }
-            removeQuestion(sessionID: payload.sessionID, requestID: payload.requestID)
-        default:
-            break
-        }
-    }
-
-    private func upsertProject(_ project: OpenCodeProject) {
-        var updatedProjects = projects
-        let previousProjects = projects
-
-        if let index = updatedProjects.firstIndex(where: { $0.id == project.id }) {
-            updatedProjects[index] = project
-        } else {
-            updatedProjects.append(project)
-        }
-
-        projects = resolvedProjectOrder(for: updatedProjects)
-        reconcileSelectedProject(previousProjects: previousProjects, updatedProjects: projects, selectingFirstProjectIfNeeded: true)
-        persistProjectOrder()
-    }
-
-    private func upsertSession(_ session: OpenCodeSession, directory: String) {
-        var cached = sessionsByDirectory[directory] ?? []
-        if let index = cached.firstIndex(where: { $0.id == session.id }) {
-            cached[index] = session
-        } else {
-            cached.append(session)
-        }
-
-        cached.sort { $0.time.updated > $1.time.updated }
-        sessionsByDirectory[directory] = cached
-
-        if directoryMatchesSelection(directory) {
-            applySelectedProjectCache()
-            if selectedSessionID == nil {
-                selectedSessionID = session.id
-            }
-        }
-    }
-
-    private func removeSession(_ session: OpenCodeSession, directory: String) {
-        var cached = sessionsByDirectory[directory] ?? []
-        cached.removeAll { $0.id == session.id }
-        sessionsByDirectory[directory] = cached
-
-        var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
-        cachedStatuses.removeValue(forKey: session.id)
-        sessionStatusesByDirectory[directory] = cachedStatuses
-        sessionSidebarIndicators.removeSession(session.id, in: directory)
-
-        if directoryMatchesSelection(directory) {
-            applySelectedProjectCache()
-        }
-
-        if selectedSessionID == session.id {
-            selectedSessionID = sessions.first?.id
-            if selectedSessionID == nil {
-                resetMessageCaches()
-                clearSelectedSessionTranscript()
-                sessionTodos = []
-            } else {
-                rebuildSelectedSessionMessages()
-            }
-        }
-    }
-
-    private func upsertSessionStatus(_ status: OpenCodeSessionStatus, sessionID: String, directory: String) {
-        var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
-        let previousStatus = cachedStatuses[sessionID]
-        cachedStatuses[sessionID] = status
-        sessionStatusesByDirectory[directory] = cachedStatuses
-        sessionSidebarIndicators.applyStatus(
-            status,
-            previousStatus: previousStatus,
-            sessionID: sessionID,
-            in: directory,
-            isSelected: directoryMatchesSelection(directory) && selectedSessionID == sessionID
+        let effects = GlobalEventRouter.apply(
+            event,
+            selectedProfileID: selectedProfileID,
+            workspaceStore: workspaceStore,
+            sessionDetailStore: sessionDetailStore,
+            sessionRequestStore: sessionRequestStore
         )
 
-        if directoryMatchesSelection(directory) {
-            applySelectedProjectCache()
-        }
-    }
-
-    private func replaceMessages(_ envelopes: [OpenCodeMessageEnvelope]) {
-        resetMessageCaches()
-        for envelope in envelopes {
-            sessionMessagesByID[envelope.id] = envelope.info
-            messagePartsByMessageID[envelope.id] = envelope.parts.sorted(by: sortParts)
-        }
-        rebuildSelectedSessionMessages()
-    }
-
-    private func upsertMessage(_ message: OpenCodeMessage) {
-        guard message.sessionID == selectedSessionID else { return }
-        sessionMessagesByID[message.id] = message
-        if messagePartsByMessageID[message.id] == nil {
-            messagePartsByMessageID[message.id] = []
-        }
-        rebuildSelectedSessionMessages()
-    }
-
-    private func removeMessage(sessionID: String, messageID: String) {
-        guard sessionID == selectedSessionID else { return }
-        sessionMessagesByID.removeValue(forKey: messageID)
-        messagePartsByMessageID.removeValue(forKey: messageID)
-        rebuildSelectedSessionMessages()
-    }
-
-    private func upsertPart(_ part: OpenCodePart) {
-        guard part.sessionID == selectedSessionID else { return }
-        var parts = messagePartsByMessageID[part.messageID] ?? []
-        if let index = parts.firstIndex(where: { $0.id == part.id }) {
-            parts[index] = part
-        } else {
-            parts.append(part)
-        }
-        messagePartsByMessageID[part.messageID] = parts.sorted(by: sortParts)
-        rebuildSelectedSessionMessages()
-    }
-
-    private func applyPartDelta(_ payload: OpenCodeEvent.MessagePartDeltaPayload) {
-        guard payload.sessionID == selectedSessionID else { return }
-        guard var parts = messagePartsByMessageID[payload.messageID],
-              let index = parts.firstIndex(where: { $0.id == payload.partID }),
-              let updated = parts[index].applyingDelta(field: payload.field, delta: payload.delta)
-        else { return }
-
-        parts[index] = updated
-        messagePartsByMessageID[payload.messageID] = parts
-        rebuildSelectedSessionMessages()
-    }
-
-    private func removePart(messageID: String, partID: String) {
-        guard var parts = messagePartsByMessageID[messageID] else { return }
-        parts.removeAll { $0.id == partID }
-        messagePartsByMessageID[messageID] = parts
-        rebuildSelectedSessionMessages()
-    }
-
-    private func upsertPermission(_ request: OpenCodePermissionRequest) {
-        guard request.sessionID == selectedSessionID else { return }
-        if let index = permissions.firstIndex(where: { $0.id == request.id }) {
-            permissions[index] = request
-        } else {
-            permissions.append(request)
+        if effects.contains(.refresh) {
+            refresh()
         }
 
-        autoRespondToPendingPermissionsIfNeeded()
-    }
-
-    private func removePermission(sessionID: String, requestID: String) {
-        guard sessionID == selectedSessionID else { return }
-        permissions.removeAll { $0.id == requestID }
-        autoRespondingPermissionIDs.remove(requestID)
-    }
-
-    private func upsertQuestion(_ request: OpenCodeQuestionRequest) {
-        guard request.sessionID == selectedSessionID else { return }
-        if let index = questions.firstIndex(where: { $0.id == request.id }) {
-            questions[index] = request
-        } else {
-            questions.append(request)
+        if effects.contains(.loadSessionDetail) {
+            syncSelectionContext(resetSessionState: true)
+            Task {
+                guard let profile = selectedProfile else { return }
+                do {
+                    try await loadSessionDetail(using: dependencies.apiFactory.makeService(profile: profile))
+                } catch {
+                    connectionState = .failed(error.localizedDescription)
+                }
+            }
         }
-    }
 
-    private func removeQuestion(sessionID: String, requestID: String) {
-        guard sessionID == selectedSessionID else { return }
-        questions.removeAll { $0.id == requestID }
-    }
-
-    private func answerQuestion(
-        _ request: OpenCodeQuestionRequest,
-        answers: [[String]],
-        using client: OpenCodeAPIClient,
-        directory: String
-    ) async throws {
-        try await client.replyToQuestion(requestID: request.id, directory: directory, answers: answers)
-        try await loadSessionDetail(using: client)
-    }
-
-    private func rejectQuestion(
-        _ request: OpenCodeQuestionRequest,
-        using client: OpenCodeAPIClient,
-        directory: String
-    ) async throws {
-        try await client.rejectQuestion(requestID: request.id, directory: directory)
-        try await loadSessionDetail(using: client)
-    }
-
-    private func replyToPermission(
-        _ request: OpenCodePermissionRequest,
-        reply: String,
-        using client: OpenCodeAPIClient,
-        directory: String
-    ) async throws {
-        try await client.replyToPermission(requestID: request.id, directory: directory, reply: reply)
-        try await loadSessionDetail(using: client)
+        if effects.contains(.autoRespondPermissions) {
+            autoRespondToPendingPermissionsIfNeeded()
+        }
     }
 
     private func autoRespondToPendingPermissionsIfNeeded() {
-        guard isPermissionAutoAcceptEnabled else { return }
-
-        let pendingRequests = permissions.filter { request in
-            request.sessionID == selectedSessionID && !autoRespondingPermissionIDs.contains(request.id)
-        }
-        guard !pendingRequests.isEmpty else { return }
-
-        Task { [weak self] in
-            guard let self else { return }
-
-            for request in pendingRequests {
-                guard self.isPermissionAutoAcceptEnabled, self.selectedSessionID == request.sessionID else { break }
-                guard self.autoRespondingPermissionIDs.insert(request.id).inserted else { continue }
-
-                defer {
-                    self.autoRespondingPermissionIDs.remove(request.id)
-                }
-
-                do {
-                    try await self.submitPermissionResponse(request, reply: "once")
-                } catch {
-                    self.connectionState = .failed(error.localizedDescription)
-                }
+        sessionRequestStore.autoRespondToPendingPermissionsIfNeeded(
+            submit: { [weak self] request, reply in
+                guard let self else { return }
+                try await self.submitPermissionResponse(request, reply: reply)
+            },
+            onError: { [weak self] error in
+                self?.connectionState = .failed(error.localizedDescription)
             }
+        )
+    }
+
+    private func syncSelectionContext(resetSessionState: Bool) {
+        if resetSessionState {
+            sessionDetailStore.selectSession(selectedSessionID)
+            sessionRequestStore.clearRequests()
         }
-    }
-
-    private var selectedPermissionAutoAcceptKey: String? {
-        guard let selectedSessionID, let directory = selectedProject?.worktree else { return nil }
-        return PermissionAutoAcceptStore.makeKey(sessionID: selectedSessionID, directory: directory)
-    }
-
-    private func rebuildSelectedSessionMessages() {
-        guard let selectedSessionID else {
-            clearSelectedSessionTranscript()
-            selectedSessionTranscriptRevision &+= 1
-            return
-        }
-
-        let messages = sessionMessagesByID.values
-            .filter { $0.sessionID == selectedSessionID }
-            .sorted { $0.createdAt < $1.createdAt }
-            .map { message in
-                OpenCodeMessageEnvelope(
-                    info: message,
-                    parts: (messagePartsByMessageID[message.id] ?? []).sorted(by: sortParts)
-                )
-            }
-        selectedSessionMessages = messages
-        selectedSessionTurns = TranscriptTurn.build(from: messages)
-        selectedSessionTranscriptRevision &+= 1
-    }
-
-    private func clearSelectedSessionTranscript() {
-        selectedSessionMessages = []
-        selectedSessionTurns = []
-    }
-
-    private func resetMessageCaches() {
-        sessionMessagesByID = [:]
-        messagePartsByMessageID = [:]
-    }
-
-    private func project(for projectID: OpenCodeProject.ID) -> OpenCodeProject? {
-        projects.first(where: { $0.id == projectID })
-    }
-
-    private func resolvedProjectOrder(for projects: [OpenCodeProject]) -> [OpenCodeProject] {
-        let storedProjectReferences = selectedProfileID.map { projectOrderStore.load(for: $0) } ?? []
-        return ProjectOrderResolver.orderedProjects(projects, storedIDs: storedProjectReferences)
-    }
-
-    private func persistProjectOrder() {
-        guard let selectedProfileID else { return }
-        let storedProjectReferences = ProjectOrderResolver.storedProjectReferences(for: projects)
-        guard !storedProjectReferences.isEmpty else { return }
-        projectOrderStore.save(storedProjectReferences, for: selectedProfileID)
-    }
-
-    private func applySelectedProjectCache() {
-        guard let selectedProject else {
-            sessions = []
-            return
-        }
-
-        sessions = sessionsByDirectory[selectedProject.worktree] ?? []
-    }
-
-    private func directoryMatchesSelection(_ directory: String) -> Bool {
-        guard let selectedProject else { return false }
-        return directory == selectedProject.worktree || directory == selectedProject.id
-    }
-
-    private func sortParts(_ lhs: OpenCodePart, _ rhs: OpenCodePart) -> Bool {
-        lhs.id < rhs.id
-    }
-
-    private func reconcileSelectedProject(
-        previousProjects: [OpenCodeProject],
-        updatedProjects: [OpenCodeProject],
-        selectingFirstProjectIfNeeded: Bool
-    ) {
-        let previousSelection = selectedProjectID
-
-        if let selectedProjectID,
-           !updatedProjects.contains(where: { $0.id == selectedProjectID }),
-           let previousSelectedProject = previousProjects.first(where: { $0.id == selectedProjectID }),
-           let replacement = updatedProjects.first(where: {
-               ProjectOrderResolver.matchesProjectLocation($0.worktree, previousSelectedProject.worktree)
-           }) {
-            self.selectedProjectID = replacement.id
-        }
-
-        if selectingFirstProjectIfNeeded,
-           (selectedProjectID == nil || !updatedProjects.contains(where: { $0.id == selectedProjectID })) {
-            selectedProjectID = updatedProjects.first?.id
-        }
-
-        if previousSelection != selectedProjectID {
-            applySelectedProjectCache()
-        }
+        sessionRequestStore.updateSelection(sessionID: selectedSessionID, directory: selectedProject?.worktree)
     }
 
     private func waitForServer(profile: ServerProfile) async throws {
-        let client = OpenCodeAPIClient(profile: profile)
+        let client = dependencies.apiFactory.makeService(profile: profile)
         for _ in 0 ..< 50 {
             if let health = try? await client.health(), health.healthy {
                 return
             }
-            try await Task.sleep(for: .milliseconds(150))
+            try await dependencies.clock.sleep(for: .milliseconds(150))
         }
         throw OpenCodeAPIError.serverError(statusCode: 0, message: "Timed out waiting for local opencode sidecar.")
+    }
+
+    private func appendSidecarLog(_ line: String) {
+        sidecarLog.append(line)
+        if sidecarLog.count > 12000 {
+            sidecarLog = String(sidecarLog.suffix(12000))
+        }
     }
 
     static func makeLocalProfile() -> ServerProfile {
         var profile = ServerProfile.localDefault
         profile.password = UUID().uuidString
         return profile
-    }
-
-    private func refreshModelCatalog(using client: OpenCodeAPIClient) async throws {
-        isLoadingModels = true
-        modelLoadError = nil
-        defer { isLoadingModels = false }
-
-        async let configTask = client.config(directory: nil)
-        async let providersTask = client.configProviders(directory: nil)
-
-        let config = try await configTask
-        let providersResponse = try await providersTask
-        applyModelCatalog(resolvedModelCatalog(config: config, providersResponse: providersResponse))
-    }
-
-    private func resolvedModelCatalog(
-        config: OpenCodeConfig,
-        providersResponse: OpenCodeConfigProviders
-    ) -> ResolvedModelCatalog {
-        let groups = providersResponse.providers
-            .map { provider in
-                OpenCodeModelProviderGroup(
-                    providerID: provider.id,
-                    providerName: provider.name,
-                    models: provider.models.map { key, model in
-                        let resolvedModelID = (model.id ?? key).trimmingCharacters(in: .whitespacesAndNewlines)
-                        return OpenCodeModelOption(
-                            providerID: provider.id,
-                            providerName: provider.name,
-                            modelID: resolvedModelID,
-                            modelName: (model.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? resolvedModelID,
-                            variants: OpenCodeModelOption.sortedVariantNames(model.variants.map { Array($0.keys) } ?? [])
-                        )
-                    }
-                    .sorted {
-                        if $0.modelName.localizedCaseInsensitiveCompare($1.modelName) == .orderedSame {
-                            return $0.modelID.localizedCaseInsensitiveCompare($1.modelID) == .orderedAscending
-                        }
-                        return $0.modelName.localizedCaseInsensitiveCompare($1.modelName) == .orderedAscending
-                    }
-                )
-            }
-            .sorted {
-                $0.providerName.localizedCaseInsensitiveCompare($1.providerName) == .orderedAscending
-            }
-            .filter { !$0.models.isEmpty }
-
-        let availableIDs = Set(groups.flatMap { $0.models }.map { $0.id })
-        let storedModelID = selectedProfileID.flatMap { modelSelectionStore.load(for: $0) }
-        let configuredModelID = normalizedModelIdentifier(config.model)
-        let providerDefaultModelID = resolvedProviderDefaultModelID(from: providersResponse.default, groups: groups)
-
-        let resolvedSelection = [selectedModelID, storedModelID, configuredModelID, providerDefaultModelID, groups.first?.models.first?.id]
-            .compactMap { $0 }
-            .first(where: { availableIDs.contains($0) })
-
-        return ResolvedModelCatalog(groups: groups, selectedModelID: resolvedSelection)
-    }
-
-    private func applyModelCatalog(_ catalog: ResolvedModelCatalog) {
-        let previousSelectedModelID = selectedModelID
-
-        if availableModelGroups != catalog.groups {
-            availableModelGroups = catalog.groups
-        }
-
-        if selectedModelID != catalog.selectedModelID {
-            selectedModelID = catalog.selectedModelID
-        }
-
-        guard let profileID = selectedProfileID else { return }
-        if let selectedModelID = catalog.selectedModelID {
-            modelSelectionStore.save(selectedModelID, for: profileID)
-
-            let availableVariants = catalog.groups
-                .flatMap { $0.models }
-                .first(where: { $0.id == selectedModelID })?
-                .variants ?? []
-            let storedVariant = modelVariantSelectionStore.load(for: profileID, modelID: selectedModelID)
-
-            if previousSelectedModelID == selectedModelID {
-                selectedModelVariant = resolvedModelVariantSelection(selectedModelVariant, availableVariants: availableVariants)
-                    ?? resolvedModelVariantSelection(storedVariant, availableVariants: availableVariants)
-            } else {
-                selectedModelVariant = resolvedModelVariantSelection(storedVariant, availableVariants: availableVariants)
-            }
-        } else {
-            modelSelectionStore.remove(for: profileID)
-            selectedModelVariant = nil
-        }
-    }
-
-    private func normalizedModelIdentifier(_ value: String?) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
-            return nil
-        }
-        return value
-    }
-
-    private func resolvedModelVariantSelection(_ value: String?, availableVariants: [String]) -> String? {
-        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
-            return nil
-        }
-        guard availableVariants.contains(value) else { return nil }
-        return value
-    }
-
-    private func resolvedProviderDefaultModelID(
-        from defaults: [String: String],
-        groups: [OpenCodeModelProviderGroup]
-    ) -> String? {
-        for group in groups {
-            guard let candidate = defaults[group.providerID]?.trimmingCharacters(in: .whitespacesAndNewlines), !candidate.isEmpty else {
-                continue
-            }
-
-            if candidate.contains("/"), group.models.contains(where: { $0.id == candidate }) {
-                return candidate
-            }
-
-            if let match = group.models.first(where: { $0.modelID == candidate }) {
-                return match.id
-            }
-        }
-
-        return nil
-    }
-
-    private struct ResolvedModelCatalog {
-        let groups: [OpenCodeModelProviderGroup]
-        let selectedModelID: String?
-    }
-}
-
-private extension KodantoAppModel.ConnectionState {
-    var isConnected: Bool {
-        if case .connected = self {
-            return true
-        }
-        return false
-    }
-}
-
-private struct ServerProfileStore {
-    private let key = "kodanto.serverProfiles"
-    private let userDefaults: UserDefaults
-
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-    }
-
-    func load() -> [ServerProfile] {
-        guard let data = userDefaults.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([ServerProfile].self, from: data)) ?? []
-    }
-
-    func save(_ profiles: [ServerProfile]) {
-        guard let data = try? JSONEncoder().encode(profiles) else { return }
-        userDefaults.set(data, forKey: key)
-    }
-}
-
-private struct ModelSelectionStore {
-    private let key = "kodanto.selectedModelByProfile"
-    private let userDefaults: UserDefaults
-
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-    }
-
-    func load(for profileID: UUID) -> String? {
-        values()[profileID.uuidString]
-    }
-
-    func save(_ modelID: String, for profileID: UUID) {
-        var updated = values()
-        updated[profileID.uuidString] = modelID
-        userDefaults.set(updated, forKey: key)
-    }
-
-    func remove(for profileID: UUID) {
-        var updated = values()
-        updated.removeValue(forKey: profileID.uuidString)
-        userDefaults.set(updated, forKey: key)
-    }
-
-    private func values() -> [String: String] {
-        userDefaults.dictionary(forKey: key) as? [String: String] ?? [:]
-    }
-}
-
-private struct ModelVariantSelectionStore {
-    private let key = "kodanto.selectedModelVariantByProfile"
-    private let userDefaults: UserDefaults
-
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-    }
-
-    func load(for profileID: UUID, modelID: String) -> String? {
-        values()[profileID.uuidString]?[modelID]
-    }
-
-    func save(_ variant: String, for profileID: UUID, modelID: String) {
-        var updated = values()
-        var profileValues = updated[profileID.uuidString] ?? [:]
-        profileValues[modelID] = variant
-        updated[profileID.uuidString] = profileValues
-        userDefaults.set(updated, forKey: key)
-    }
-
-    func remove(for profileID: UUID, modelID: String) {
-        var updated = values()
-        var profileValues = updated[profileID.uuidString] ?? [:]
-        profileValues.removeValue(forKey: modelID)
-        updated[profileID.uuidString] = profileValues.isEmpty ? nil : profileValues
-        userDefaults.set(updated, forKey: key)
-    }
-
-    func remove(for profileID: UUID) {
-        var updated = values()
-        updated.removeValue(forKey: profileID.uuidString)
-        userDefaults.set(updated, forKey: key)
-    }
-
-    private func values() -> [String: [String: String]] {
-        userDefaults.dictionary(forKey: key) as? [String: [String: String]] ?? [:]
-    }
-}
-
-private struct PermissionAutoAcceptStore {
-    private let key = "kodanto.permissionAutoAccept"
-    private let userDefaults: UserDefaults
-
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-    }
-
-    func load() -> [String: Bool] {
-        userDefaults.dictionary(forKey: key) as? [String: Bool] ?? [:]
-    }
-
-    func save(_ values: [String: Bool]) {
-        userDefaults.set(values, forKey: key)
-    }
-
-    static func makeKey(sessionID: String, directory: String) -> String {
-        "\(directory)|\(sessionID)"
-    }
-}
-
-struct ProjectOrderStore {
-    private let key = "kodanto.projectOrderByProfile"
-    private let userDefaults: UserDefaults
-
-    init(userDefaults: UserDefaults = .standard) {
-        self.userDefaults = userDefaults
-    }
-
-    func load(for profileID: UUID) -> [String] {
-        values()[profileID.uuidString] ?? []
-    }
-
-    func save(_ projectIDs: [String], for profileID: UUID) {
-        let deduplicatedIDs = ProjectOrderResolver.deduplicatedProjectIDs(projectIDs)
-        guard !deduplicatedIDs.isEmpty else { return }
-        var updated = values()
-        updated[profileID.uuidString] = deduplicatedIDs
-        userDefaults.set(updated, forKey: key)
-    }
-
-    func remove(for profileID: UUID) {
-        var updated = values()
-        updated.removeValue(forKey: profileID.uuidString)
-        userDefaults.set(updated, forKey: key)
-    }
-
-    private func values() -> [String: [String]] {
-        userDefaults.dictionary(forKey: key) as? [String: [String]] ?? [:]
-    }
-}
-
-enum ProjectDropPlacement: Equatable {
-    case before
-    case after
-}
-
-enum ProjectOrderResolver {
-    static func deduplicatedProjectIDs(_ projectIDs: [String]) -> [String] {
-        var seenIDs: Set<String> = []
-        return projectIDs.filter { seenIDs.insert($0).inserted }
-    }
-
-    static func storedProjectReferences(for projects: [OpenCodeProject]) -> [String] {
-        var seenReferences: Set<String> = []
-        return projects.compactMap { project in
-            let reference = projectIdentity(for: project)
-            guard seenReferences.insert(reference).inserted else { return nil }
-            return reference
-        }
-    }
-
-    static func matchesProjectLocation(_ lhs: String, _ rhs: String) -> Bool {
-        normalizedProjectLocation(lhs) == normalizedProjectLocation(rhs)
-    }
-
-    static func deduplicatedProjects(_ projects: [OpenCodeProject], preferredIDs: [String] = []) -> [OpenCodeProject] {
-        let storedIndexes = Dictionary(uniqueKeysWithValues: deduplicatedProjectIDs(preferredIDs).enumerated().map { ($1, $0) })
-        var bestProjectsByIdentity: [String: OpenCodeProject] = [:]
-        var orderedIdentities: [String] = []
-
-        for project in projects {
-            let identity = projectIdentity(for: project)
-
-            guard let existing = bestProjectsByIdentity[identity] else {
-                orderedIdentities.append(identity)
-                bestProjectsByIdentity[identity] = project
-                continue
-            }
-
-            if prefers(project, over: existing, storedIndexes: storedIndexes) {
-                bestProjectsByIdentity[identity] = project
-            }
-        }
-
-        return orderedIdentities.compactMap { bestProjectsByIdentity[$0] }
-    }
-
-    static func orderedProjects(_ projects: [OpenCodeProject], storedIDs: [String]) -> [OpenCodeProject] {
-        let orderedByRecency = deduplicatedProjects(projects, preferredIDs: storedIDs).sorted { lhs, rhs in
-            if lhs.time.updated != rhs.time.updated {
-                return lhs.time.updated > rhs.time.updated
-            }
-
-            return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
-        }
-        guard !storedIDs.isEmpty else { return orderedByRecency }
-
-        let storedIndexes = Dictionary(uniqueKeysWithValues: deduplicatedProjectIDs(storedIDs).enumerated().map { ($1, $0) })
-
-        return orderedByRecency.sorted { lhs, rhs in
-            let lhsStoredIndex = storedIndex(for: lhs, in: storedIndexes)
-            let rhsStoredIndex = storedIndex(for: rhs, in: storedIndexes)
-
-            switch (lhsStoredIndex, rhsStoredIndex) {
-            case let (lhsIndex?, rhsIndex?) where lhsIndex != rhsIndex:
-                return lhsIndex < rhsIndex
-            case (_?, nil):
-                return true
-            case (nil, _?):
-                return false
-            default:
-                if lhs.time.updated != rhs.time.updated {
-                    return lhs.time.updated > rhs.time.updated
-                }
-
-                return lhs.id.localizedCaseInsensitiveCompare(rhs.id) == .orderedAscending
-            }
-        }
-    }
-
-    static func reorderedProjects(
-        _ projects: [OpenCodeProject],
-        movingProjectID: OpenCodeProject.ID,
-        relativeTo targetProjectID: OpenCodeProject.ID,
-        placement: ProjectDropPlacement
-    ) -> [OpenCodeProject] {
-        var reorderedProjects = deduplicatedProjects(projects)
-
-        guard reorderedProjects.count > 1 else { return reorderedProjects }
-        guard movingProjectID != targetProjectID else { return reorderedProjects }
-        guard let sourceIndex = reorderedProjects.firstIndex(where: { $0.id == movingProjectID }) else { return reorderedProjects }
-        guard let targetIndex = reorderedProjects.firstIndex(where: { $0.id == targetProjectID }) else { return reorderedProjects }
-
-        let movedProject = reorderedProjects.remove(at: sourceIndex)
-
-        var insertionIndex = targetIndex
-        if placement == .after {
-            insertionIndex += 1
-        }
-        if sourceIndex < insertionIndex {
-            insertionIndex -= 1
-        }
-
-        reorderedProjects.insert(movedProject, at: max(0, min(insertionIndex, reorderedProjects.count)))
-        return reorderedProjects
-    }
-
-    private static func projectIdentity(for project: OpenCodeProject) -> String {
-        let normalizedWorktree = normalizedProjectLocation(project.worktree)
-        if normalizedWorktree.isEmpty {
-            return "id:\(project.id)"
-        }
-
-        return "worktree:\(normalizedWorktree)"
-    }
-
-    private static func normalizedProjectLocation(_ location: String) -> String {
-        NSString(string: location).standardizingPath
-    }
-
-    private static func prefers(
-        _ candidate: OpenCodeProject,
-        over existing: OpenCodeProject,
-        storedIndexes: [String: Int]
-    ) -> Bool {
-        let candidateStoredIndex = storedIndex(for: candidate, in: storedIndexes)
-        let existingStoredIndex = storedIndex(for: existing, in: storedIndexes)
-
-        switch (candidateStoredIndex, existingStoredIndex) {
-        case let (candidateIndex?, existingIndex?) where candidateIndex != existingIndex:
-            return candidateIndex < existingIndex
-        case (_?, nil):
-            return true
-        case (nil, _?):
-            return false
-        default:
-            if candidate.time.updated != existing.time.updated {
-                return candidate.time.updated > existing.time.updated
-            }
-
-            return candidate.id.localizedCaseInsensitiveCompare(existing.id) == .orderedAscending
-        }
-    }
-
-    private static func storedIndex(for project: OpenCodeProject, in storedIndexes: [String: Int]) -> Int? {
-        let references = [projectIdentity(for: project), project.id]
-        return references.compactMap { storedIndexes[$0] }.min()
-    }
-}
-
-private extension Array {
-    mutating func moveItems(fromOffsets source: IndexSet, toOffset destination: Int) {
-        let movingItems = source.map { self[$0] }
-        var insertionIndex = destination
-
-        for index in source.sorted(by: >) {
-            remove(at: index)
-            if index < insertionIndex {
-                insertionIndex -= 1
-            }
-        }
-
-        insert(contentsOf: movingItems, at: insertionIndex)
     }
 }

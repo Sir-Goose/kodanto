@@ -6,8 +6,34 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		34A3BB732F5DA6C8005149D1 /* TestFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB6D2F5DA6C8005149D1 /* TestFixtures.swift */; };
+		34A3BB742F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB6E2F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift */; };
+		34A3BB752F5DA6C8005149D1 /* LiveSyncTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB6F2F5DA6C8005149D1 /* LiveSyncTrackerTests.swift */; };
+		34A3BB762F5DA6C8005149D1 /* TranscriptTurnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB702F5DA6C8005149D1 /* TranscriptTurnTests.swift */; };
+		34A3BB772F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */; };
+		34A3BB782F5DA6C8005149D1 /* ProjectOrderResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		34A3BB792F5DA6C8005149D1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 34A3BB562F5DA6C6005149D1 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 34A3BB5D2F5DA6C6005149D1;
+			remoteInfo = kodanto;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		34A3BB5E2F5DA6C6005149D1 /* Kodanto.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kodanto.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		34A3BB6C2F5DA6C8005149D1 /* kodantoTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = kodantoTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		34A3BB6D2F5DA6C8005149D1 /* TestFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFixtures.swift; sourceTree = "<group>"; };
+		34A3BB6E2F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeSSEClientEventParserTests.swift; sourceTree = "<group>"; };
+		34A3BB6F2F5DA6C8005149D1 /* LiveSyncTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSyncTrackerTests.swift; sourceTree = "<group>"; };
+		34A3BB702F5DA6C8005149D1 /* TranscriptTurnTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTurnTests.swift; sourceTree = "<group>"; };
+		34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTodoDockStateMachineTests.swift; sourceTree = "<group>"; };
+		34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectOrderResolverTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -33,6 +59,7 @@
 			isa = PBXGroup;
 			children = (
 				34A3BB602F5DA6C6005149D1 /* kodanto */,
+				34A3BB7A2F5DA6C8005149D1 /* kodantoTests */,
 				34A3BB5F2F5DA6C6005149D1 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,8 +68,22 @@
 			isa = PBXGroup;
 			children = (
 				34A3BB5E2F5DA6C6005149D1 /* Kodanto.app */,
+				34A3BB6C2F5DA6C8005149D1 /* kodantoTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		34A3BB7A2F5DA6C8005149D1 /* kodantoTests */ = {
+			isa = PBXGroup;
+			children = (
+				34A3BB6D2F5DA6C8005149D1 /* TestFixtures.swift */,
+				34A3BB6E2F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift */,
+				34A3BB6F2F5DA6C8005149D1 /* LiveSyncTrackerTests.swift */,
+				34A3BB702F5DA6C8005149D1 /* TranscriptTurnTests.swift */,
+				34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */,
+				34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */,
+			);
+			path = kodantoTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -70,6 +111,24 @@
 			productReference = 34A3BB5E2F5DA6C6005149D1 /* Kodanto.app */;
 			productType = "com.apple.product-type.application";
 		};
+		34A3BB7B2F5DA6C8005149D1 /* kodantoTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 34A3BB7E2F5DA6C8005149D1 /* Build configuration list for PBXNativeTarget "kodantoTests" */;
+			buildPhases = (
+				34A3BB7D2F5DA6C8005149D1 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				34A3BB7C2F5DA6C8005149D1 /* PBXTargetDependency */,
+			);
+			name = kodantoTests;
+			packageProductDependencies = (
+			);
+			productName = kodantoTests;
+			productReference = 34A3BB6C2F5DA6C8005149D1 /* kodantoTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +141,10 @@
 				TargetAttributes = {
 					34A3BB5D2F5DA6C6005149D1 = {
 						CreatedOnToolsVersion = 26.3;
+					};
+					34A3BB7B2F5DA6C8005149D1 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = 34A3BB5D2F5DA6C6005149D1;
 					};
 				};
 			};
@@ -100,6 +163,7 @@
 			projectRoot = "";
 			targets = (
 				34A3BB5D2F5DA6C6005149D1 /* kodanto */,
+				34A3BB7B2F5DA6C8005149D1 /* kodantoTests */,
 			);
 		};
 /* End PBXProject section */
@@ -122,7 +186,28 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		34A3BB7D2F5DA6C8005149D1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				34A3BB732F5DA6C8005149D1 /* TestFixtures.swift in Sources */,
+				34A3BB742F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift in Sources */,
+				34A3BB752F5DA6C8005149D1 /* LiveSyncTrackerTests.swift in Sources */,
+				34A3BB762F5DA6C8005149D1 /* TranscriptTurnTests.swift in Sources */,
+				34A3BB772F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift in Sources */,
+				34A3BB782F5DA6C8005149D1 /* ProjectOrderResolverTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		34A3BB7C2F5DA6C8005149D1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 34A3BB5D2F5DA6C6005149D1 /* kodanto */;
+			targetProxy = 34A3BB792F5DA6C8005149D1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		34A3BB672F5DA6C8005149D1 /* Debug */ = {
@@ -309,6 +394,52 @@
 			};
 			name = Release;
 		};
+		34A3BB7F2F5DA6C8005149D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = mallison.kodantoTests;
+				PRODUCT_MODULE_NAME = kodantoTests;
+				PRODUCT_NAME = kodantoTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kodanto.app/Contents/MacOS/Kodanto";
+				TEST_TARGET_NAME = kodanto;
+			};
+			name = Debug;
+		};
+		34A3BB802F5DA6C8005149D1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = mallison.kodantoTests;
+				PRODUCT_MODULE_NAME = kodantoTests;
+				PRODUCT_NAME = kodantoTests;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Kodanto.app/Contents/MacOS/Kodanto";
+				TEST_TARGET_NAME = kodanto;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -329,6 +460,15 @@
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
+		};
+		34A3BB7E2F5DA6C8005149D1 /* Build configuration list for PBXNativeTarget "kodantoTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				34A3BB7F2F5DA6C8005149D1 /* Debug */,
+				34A3BB802F5DA6C8005149D1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 	};

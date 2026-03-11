@@ -4,8 +4,15 @@ struct SessionPermissionDockView: View {
     @Bindable var model: KodantoAppModel
     let request: OpenCodePermissionRequest
 
-    @State private var isResponding = false
-    @State private var responseError: String?
+    @State private var actionModel: SessionPermissionActionModel
+
+    init(model: KodantoAppModel, request: OpenCodePermissionRequest) {
+        self.model = model
+        self.request = request
+        _actionModel = State(initialValue: SessionPermissionActionModel(requestID: request.id) { reply in
+            try await model.submitPermissionResponse(request, reply: reply)
+        })
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -51,9 +58,9 @@ struct SessionPermissionDockView: View {
                 }
             }
             .toggleStyle(.switch)
-            .disabled(!model.canTogglePermissionAutoAccept || isResponding)
+            .disabled(!model.canTogglePermissionAutoAccept || actionModel.isResponding)
 
-            if let responseError, !responseError.isEmpty {
+            if let responseError = actionModel.responseError, !responseError.isEmpty {
                 Text(responseError)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -70,8 +77,7 @@ struct SessionPermissionDockView: View {
         )
         .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
         .onChange(of: request.id) { _, _ in
-            isResponding = false
-            responseError = nil
+            actionModel.reset(for: request.id)
         }
     }
 
@@ -99,22 +105,22 @@ struct SessionPermissionDockView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Button("Deny", role: .destructive) {
-                respond(with: "reject")
+                actionModel.respond(with: .reject)
             }
-            .disabled(isResponding)
+            .disabled(actionModel.isResponding)
 
             Spacer(minLength: 0)
 
             Button("Allow Always") {
-                respond(with: "always")
+                actionModel.respond(with: .always)
             }
-            .disabled(isResponding)
+            .disabled(actionModel.isResponding)
 
             Button("Allow Once") {
-                respond(with: "once")
+                actionModel.respond(with: .once)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isResponding)
+            .disabled(actionModel.isResponding)
         }
     }
 
@@ -143,28 +149,6 @@ struct SessionPermissionDockView: View {
             return "The agent wants to inspect files in your project."
         default:
             return nil
-        }
-    }
-
-    private func respond(with reply: String) {
-        guard !isResponding else { return }
-        isResponding = true
-        responseError = nil
-
-        Task {
-            do {
-                try await model.submitPermissionResponse(request, reply: reply)
-            } catch {
-                await MainActor.run {
-                    isResponding = false
-                    responseError = error.localizedDescription
-                }
-                return
-            }
-
-            await MainActor.run {
-                isResponding = false
-            }
         }
     }
 }
