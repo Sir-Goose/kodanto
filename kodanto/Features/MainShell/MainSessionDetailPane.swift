@@ -29,6 +29,54 @@ struct MainSessionDetailPane: View {
         ceil(promptLineHeight + (Self.composerVerticalPadding * 2))
     }
 
+    private var selectedProject: OpenCodeProject? {
+        model.workspaceStore.selectedProject
+    }
+
+    private var selectedSession: OpenCodeSession? {
+        model.workspaceStore.selectedSession
+    }
+
+    private var selectedSessionID: OpenCodeSession.ID? {
+        model.workspaceStore.selectedSessionID
+    }
+
+    private var selectedSessionMessages: [OpenCodeMessageEnvelope] {
+        model.sessionDetailStore.selectedSessionMessages
+    }
+
+    private var selectedSessionTurns: [TranscriptTurn] {
+        model.sessionDetailStore.selectedSessionTurns
+    }
+
+    private var selectedSessionTranscriptRevision: Int {
+        model.sessionDetailStore.selectedSessionTranscriptRevision
+    }
+
+    private var sessionTodos: [OpenCodeTodo] {
+        model.sessionDetailStore.sessionTodos
+    }
+
+    private var permissions: [OpenCodePermissionRequest] {
+        model.sessionRequestStore.permissions
+    }
+
+    private var questions: [OpenCodeQuestionRequest] {
+        model.sessionRequestStore.questions
+    }
+
+    private var activePermissionRequest: OpenCodePermissionRequest? {
+        model.sessionRequestStore.activePermissionRequest
+    }
+
+    private var activeQuestionRequest: OpenCodeQuestionRequest? {
+        model.sessionRequestStore.activeQuestionRequest
+    }
+
+    private var isSelectedSessionRunning: Bool {
+        model.workspaceStore.isSelectedSessionRunning
+    }
+
     var body: some View {
         GeometryReader { geometry in
             detailContent(for: geometry.size.height)
@@ -41,8 +89,10 @@ struct MainSessionDetailPane: View {
     private func detailContent(for availableHeight: CGFloat) -> some View {
         let composerMaxHeight = max(promptMinimumHeight, availableHeight * 0.3)
 
-        if let session = model.selectedSession {
+        if let session = selectedSession {
             selectedSessionView(session: session, composerMaxHeight: composerMaxHeight)
+        } else if let project = selectedProject {
+            newSessionView(project: project, composerMaxHeight: composerMaxHeight)
         } else {
             ContentUnavailableView("Select a session", systemImage: "bubble.left.and.text.bubble.right")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -66,6 +116,19 @@ struct MainSessionDetailPane: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func newSessionView(project: OpenCodeProject, composerMaxHeight: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            newSessionHeader(for: project)
+            Divider()
+            Spacer(minLength: 0)
+            composer(maxHeight: composerMaxHeight)
+                .frame(maxWidth: Self.composerMaxWidth)
+                .padding(.horizontal, Self.composerOuterPadding)
+                .padding(.bottom, Self.composerOuterPadding)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
     private var transcriptPanel: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -73,6 +136,7 @@ struct MainSessionDetailPane: View {
                     transcriptTurns
                     transcriptBottomAnchor
                 }
+                .id("transcript-\(selectedSessionID ?? "none")-\(selectedSessionTranscriptRevision)")
                 .padding()
                 .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -80,27 +144,27 @@ struct MainSessionDetailPane: View {
             .defaultScrollAnchor(.bottom)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onAppear {
-                pendingInitialBottomSessionID = model.selectedSessionID
+                pendingInitialBottomSessionID = selectedSessionID
                 jumpTranscriptToBottom(using: proxy)
             }
-            .onChange(of: model.selectedSessionID) { _, sessionID in
+            .onChange(of: selectedSessionID) { _, sessionID in
                 pendingInitialBottomSessionID = sessionID
                 transcriptDisclosureStore.reset()
                 jumpTranscriptToBottom(using: proxy)
             }
-            .onChange(of: model.selectedSessionTranscriptRevision) { _, _ in
+            .onChange(of: selectedSessionTranscriptRevision) { _, _ in
                 handleTranscriptChange(using: proxy)
             }
-            .onChange(of: model.sessionTodos.count) { _, _ in
+            .onChange(of: sessionTodos.count) { _, _ in
                 handleTranscriptChange(using: proxy)
             }
-            .onChange(of: model.permissions.count) { _, _ in
+            .onChange(of: permissions.count) { _, _ in
                 handleTranscriptChange(using: proxy)
             }
-            .onChange(of: model.questions.count) { _, _ in
+            .onChange(of: questions.count) { _, _ in
                 handleTranscriptChange(using: proxy)
             }
-            .onChange(of: model.isSelectedSessionRunning) { _, isRunning in
+            .onChange(of: isSelectedSessionRunning) { _, isRunning in
                 if isRunning {
                     scrollTranscriptToBottom(using: proxy)
                 }
@@ -109,10 +173,10 @@ struct MainSessionDetailPane: View {
     }
 
     private var transcriptTurns: some View {
-        ForEach(model.selectedSessionTurns) { turn in
+        ForEach(selectedSessionTurns) { turn in
             TranscriptTurnView(
                 turn: turn,
-                worktreeRoot: model.selectedProject?.worktree,
+                worktreeRoot: selectedProject?.worktree,
                 resolveTaskTarget: { sessionID in
                     model.loadedSessionNavigationTarget(for: sessionID)
                 },
@@ -187,13 +251,13 @@ struct MainSessionDetailPane: View {
 
     private func bottomPanel(maxHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: Self.composerContentGap) {
-            SessionTodoDockView(todos: model.sessionTodos)
-                .id(model.selectedSessionID ?? "session-todo-dock")
+            SessionTodoDockView(todos: sessionTodos)
+                .id(selectedSessionID ?? "session-todo-dock")
 
-            if let request = model.activePermissionRequest {
+            if let request = activePermissionRequest {
                 SessionPermissionDockView(model: model, request: request)
                     .id(request.id)
-            } else if let request = model.activeQuestionRequest {
+            } else if let request = activeQuestionRequest {
                 SessionQuestionDockView(model: model, request: request)
                     .id(request.id)
             } else {
@@ -222,13 +286,28 @@ struct MainSessionDetailPane: View {
         .animation(.easeInOut(duration: 0.16), value: splitViewVisibility)
     }
 
+    private func newSessionHeader(for project: OpenCodeProject) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("New Session")
+                .font(.title2.weight(.semibold))
+            Text(project.worktree)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .padding(.leading, splitViewVisibility == .detailOnly ? Self.collapsedHeaderLeadingInset : 0)
+        .background(.thinMaterial)
+        .animation(.easeInOut(duration: 0.16), value: splitViewVisibility)
+    }
+
     private func scrollTranscriptToBottomIfNeeded(using proxy: ScrollViewProxy) {
-        guard model.isSelectedSessionRunning else { return }
+        guard isSelectedSessionRunning else { return }
         scrollTranscriptToBottom(using: proxy)
     }
 
     private func handleTranscriptChange(using proxy: ScrollViewProxy) {
-        guard let selectedSessionID = model.selectedSessionID else { return }
+        guard let selectedSessionID else { return }
 
         if pendingInitialBottomSessionID == selectedSessionID {
             jumpTranscriptToBottom(using: proxy)
@@ -243,7 +322,7 @@ struct MainSessionDetailPane: View {
     }
 
     private var transcriptHasVisibleContent: Bool {
-        !model.selectedSessionMessages.isEmpty || !model.sessionTodos.isEmpty || !model.permissions.isEmpty || !model.questions.isEmpty
+        !selectedSessionMessages.isEmpty || !sessionTodos.isEmpty || !permissions.isEmpty || !questions.isEmpty
     }
 
     private func jumpTranscriptToBottom(using proxy: ScrollViewProxy) {

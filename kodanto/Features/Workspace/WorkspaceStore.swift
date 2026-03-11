@@ -178,9 +178,20 @@ final class WorkspaceStore {
         statuses: [String: OpenCodeSessionStatus],
         for project: OpenCodeProject
     ) {
-        let sortedSessions = loadedSessions
+        let previousSessions = sessionsByDirectory[project.worktree] ?? []
+        var sortedSessions = loadedSessions
             .filter { !$0.isArchived }
             .sorted { $0.time.updated > $1.time.updated }
+
+        if selectedProjectID == project.id,
+           let selectedSessionID,
+           !sortedSessions.contains(where: { $0.id == selectedSessionID }),
+           let selectedCachedSession = previousSessions.first(where: { $0.id == selectedSessionID }),
+           !selectedCachedSession.isArchived {
+            sortedSessions.append(selectedCachedSession)
+            sortedSessions.sort { $0.time.updated > $1.time.updated }
+        }
+
         let previousStatuses = sessionStatusesByDirectory[project.worktree] ?? [:]
 
         sessionsByDirectory[project.worktree] = sortedSessions

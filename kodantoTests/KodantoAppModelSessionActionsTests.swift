@@ -67,6 +67,54 @@ final class KodantoAppModelSessionActionsTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(service.todosRequests.count, 1)
     }
 
+    func testSendPromptFromNewSessionRendersMessagesWithoutSessionReselect() async throws {
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let service = MockOpenCodeAPIService(sessions: [])
+        let model = makeModel(apiService: service)
+        model.workspaceStore.applyLoadedProjects([project], profileID: model.selectedProfileID)
+        model.workspaceStore.selectProject(project.id)
+
+        model.createSession(in: project.id)
+        model.draftPrompt = "Hello from first prompt"
+        model.sendPrompt()
+
+        XCTAssertTrue(await waitUntil { service.createCalls.count == 1 })
+        XCTAssertTrue(await waitUntil { service.promptCalls.count == 1 })
+        XCTAssertTrue(await waitUntil { !model.selectedSessionMessages.isEmpty })
+
+        guard let firstMessage = model.selectedSessionMessages.first else {
+            XCTFail("Expected first message to render for new-session first send")
+            return
+        }
+
+        switch firstMessage.info {
+        case .user:
+            break
+        case .assistant:
+            XCTFail("Expected first rendered message to be the user prompt")
+        }
+
+        let renderedTextParts = firstMessage.parts.compactMap { part -> String? in
+            guard case .text(let value) = part else { return nil }
+            return value.text
+        }
+        XCTAssertTrue(renderedTextParts.contains("Hello from first prompt"))
+    }
+
+    private func waitUntil(
+        attempts: Int = 120,
+        interval: Duration = .milliseconds(10),
+        condition: () -> Bool
+    ) async -> Bool {
+        for _ in 0 ..< attempts {
+            if condition() {
+                return true
+            }
+            try? await Task.sleep(for: interval)
+        }
+        return false
+    }
+
     private func makeModel(apiService: MockOpenCodeAPIService) -> KodantoAppModel {
         let profile = ServerProfile(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000123") ?? UUID(),
@@ -102,12 +150,29 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         let archivedAt: Double?
     }
 
+    struct CreateCall: Equatable {
+        let directory: String
+        let title: String?
+    }
+
+    struct PromptCall: Equatable {
+        let sessionID: String
+        let directory: String
+        let text: String
+        let model: PromptRequestBody.ModelSelection?
+        let variant: String?
+    }
+
     private(set) var updateCalls: [UpdateCall] = []
+    private(set) var createCalls: [CreateCall] = []
+    private(set) var promptCalls: [PromptCall] = []
     private(set) var permissionsRequests: [String] = []
     private(set) var questionsRequests: [String] = []
     private(set) var messagesRequests: [(sessionID: String, directory: String)] = []
     private(set) var todosRequests: [(sessionID: String, directory: String)] = []
     private var sessionsByID: [String: OpenCodeSession]
+    private var messageEnvelopesBySessionID: [String: [OpenCodeMessageEnvelope]] = [:]
+    private var sessionSerial = 0
 
     init(sessions: [OpenCodeSession]) {
         sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
@@ -160,7 +225,7 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
 
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] {
         messagesRequests.append((sessionID, directory))
-        return []
+        return messageEnvelopesBySessionID[sessionID] ?? []
     }
 
     func sessionTodos(sessionID: String, directory: String) async throws -> [OpenCodeTodo] {
@@ -175,7 +240,29 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
     func projects() async throws -> [OpenCodeProject] { fatalError("unused") }
     func sessions(directory: String) async throws -> [OpenCodeSession] { fatalError("unused") }
     func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus] { fatalError("unused") }
-    func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
+    func createSession(directory: String, title: String?) async throws -> OpenCodeSession {
+        createCalls.append(.init(directory: directory, title: title))
+        sessionSerial += 1
+
+        let sessionID = "session-created-\(sessionSerial)"
+        let now = Date().timeIntervalSince1970
+        let created = OpenCodeSession(
+            id: sessionID,
+            slug: sessionID,
+            projectID: "project-1",
+            workspaceID: nil,
+            directory: directory,
+            parentID: nil,
+            summary: nil,
+            share: nil,
+            title: title ?? "Session",
+            version: "1",
+            time: .init(created: now - 1, updated: now, compacting: nil, archived: nil),
+            revert: nil
+        )
+        sessionsByID[sessionID] = created
+        return created
+    }
     func initializeGitRepository(directory: String) async throws -> OpenCodeProject { fatalError("unused") }
     func sendPrompt(
         sessionID: String,
@@ -183,7 +270,38 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         text: String,
         model: PromptRequestBody.ModelSelection?,
         variant: String?
-    ) async throws { fatalError("unused") }
+    ) async throws {
+        promptCalls.append(.init(sessionID: sessionID, directory: directory, text: text, model: model, variant: variant))
+
+        let createdAt = Date().timeIntervalSince1970
+        let messageID = "message-\(UUID().uuidString)"
+        let partID = "part-\(UUID().uuidString)"
+        let envelope = OpenCodeMessageEnvelope(
+            info: .user(
+                .init(
+                    id: messageID,
+                    sessionID: sessionID,
+                    role: "user",
+                    time: .init(created: createdAt),
+                    agent: "assistant",
+                    model: .init(providerID: "provider-1", modelID: "model-1"),
+                    variant: variant
+                )
+            ),
+            parts: [
+                .text(
+                    .init(
+                        id: partID,
+                        sessionID: sessionID,
+                        messageID: messageID,
+                        type: "text",
+                        text: text
+                    )
+                )
+            ]
+        )
+        messageEnvelopesBySessionID[sessionID, default: []].append(envelope)
+    }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }

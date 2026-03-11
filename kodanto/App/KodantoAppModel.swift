@@ -206,7 +206,7 @@ final class KodantoAppModel {
     }
 
     var canSendPrompt: Bool {
-        selectedSession != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        selectedProject != nil && selectedProfile != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var canRefresh: Bool {
@@ -423,22 +423,10 @@ final class KodantoAppModel {
     }
 
     func createSession(in projectID: OpenCodeProject.ID) {
-        Task {
-            guard let profile = selectedProfile, let project = projects.first(where: { $0.id == projectID }) else { return }
-            workspaceStore.selectProject(project.id)
-            syncSelectionContext(resetSessionState: false)
-
-            do {
-                let client = dependencies.apiFactory.makeService(profile: profile)
-                let created = try await client.createSession(directory: project.worktree, title: nil)
-                try await loadSessions(for: project, using: client)
-                let didSwitch = workspaceStore.selectSession(created.id, in: project.id)
-                syncSelectionContext(resetSessionState: didSwitch)
-                try await loadSessionDetail(using: client)
-            } catch {
-                connectionState = .failed(error.localizedDescription)
-            }
-        }
+        guard selectedProfile != nil, let project = projects.first(where: { $0.id == projectID }) else { return }
+        workspaceStore.selectProject(project.id)
+        workspaceStore.clearSelectedSession()
+        syncSelectionContext(resetSessionState: true)
     }
 
     func renameSession(
@@ -531,15 +519,47 @@ final class KodantoAppModel {
 
     func sendPrompt() {
         Task {
-            guard let profile = selectedProfile, let project = selectedProject, let session = selectedSession else { return }
+            guard let profile = selectedProfile, let project = selectedProject else { return }
 
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
-                try await composerStore.submitPrompt(using: client, project: project, session: session) {
-                    try await self.loadSessionDetail(using: client)
-                    try await self.loadSessions(for: project, using: client)
+                let session: OpenCodeSession
+                let createdSessionJustNow: Bool
+                if let selectedSession {
+                    session = selectedSession
+                    createdSessionJustNow = false
+                } else {
+                    let createdSession = try await client.createSession(directory: project.worktree, title: nil)
+                    _ = workspaceStore.upsertSession(createdSession, directory: project.worktree)
+                    _ = workspaceStore.selectSession(createdSession.id, in: project.id)
+                    syncSelectionContext(resetSessionState: true)
+                    try await loadSessionDetail(using: client)
+                    session = selectedSession ?? createdSession
+                    createdSessionJustNow = true
+                }
+
+                if createdSessionJustNow {
+                    try await composerStore.submitPrompt(
+                        using: client,
+                        project: project,
+                        session: session
+                    ) {
+                        try await self.loadSessionDetail(using: client)
+                    }
+                } else {
+                    try await composerStore.submitPrompt(
+                        using: client,
+                        project: project,
+                        session: session
+                    ) {
+                        try await self.loadSessionDetail(using: client)
+                        try await self.loadSessions(for: project, using: client)
+                    }
                 }
             } catch {
+                if let profile = selectedProfile {
+                    try? await loadSessionDetail(using: dependencies.apiFactory.makeService(profile: profile))
+                }
                 connectionState = .failed(error.localizedDescription)
             }
         }
