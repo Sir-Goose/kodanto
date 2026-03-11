@@ -75,6 +75,14 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func initializeGitRepository(directory: String) async throws -> OpenCodeProject {
+        try await request(
+            path: "/project/git/init",
+            method: "POST",
+            directory: directory
+        )
+    }
+
     func sendPrompt(
         sessionID: String,
         directory: String,

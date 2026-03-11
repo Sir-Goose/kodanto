@@ -438,6 +438,29 @@ final class KodantoAppModel {
         }
     }
 
+    func addProject(from directory: String) {
+        Task {
+            guard let profile = selectedProfile else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let createdProject = try await client.initializeGitRepository(directory: directory)
+
+                try await refreshAll(using: client, scope: .liveData)
+
+                guard let refreshedProject = projects.first(where: { $0.id == createdProject.id }) else { return }
+                workspaceStore.selectProject(refreshedProject.id)
+                syncSelectionContext(resetSessionState: true)
+
+                if !workspaceStore.hasLoadedSessions(for: refreshedProject) {
+                    try await loadSessions(for: refreshedProject, using: client)
+                }
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
     func sendPrompt() {
         Task {
             guard let profile = selectedProfile, let project = selectedProject, let session = selectedSession else { return }

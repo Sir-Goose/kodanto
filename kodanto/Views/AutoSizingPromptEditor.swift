@@ -181,9 +181,10 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
 
             guard let textView, let scrollView, let layoutManager = textView.layoutManager, let textContainer = textView.textContainer else { return }
 
-            let availableWidth = max(scrollView.contentSize.width, 1)
-            if textContainer.containerSize.width != availableWidth {
-                textContainer.containerSize = NSSize(width: availableWidth, height: CGFloat.greatestFiniteMagnitude)
+            let availableContentWidth = max(scrollView.contentSize.width, 1)
+            let effectiveTextContainerWidth = max(1, availableContentWidth - (textView.textContainerInset.width * 2))
+            if textContainer.containerSize.width != effectiveTextContainerWidth {
+                textContainer.containerSize = NSSize(width: effectiveTextContainerWidth, height: CGFloat.greatestFiniteMagnitude)
             }
 
             layoutManager.ensureLayout(for: textContainer)
@@ -194,8 +195,8 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             let targetVisibleHeight = min(contentHeight, max(parent.maxHeight, minimumLineHeight))
             let documentHeight = max(contentHeight, targetVisibleHeight)
 
-            if textView.frame.size.width != availableWidth || textView.frame.size.height != documentHeight {
-                textView.setFrameSize(NSSize(width: availableWidth, height: documentHeight))
+            if textView.frame.size.width != availableContentWidth || textView.frame.size.height != documentHeight {
+                textView.setFrameSize(NSSize(width: availableContentWidth, height: documentHeight))
             }
 
             if abs(parent.measuredHeight - targetVisibleHeight) > 0.5 {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -16,8 +17,9 @@ struct MainSidebarPane: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                sidebarSectionHeader("Projects")
+                projectsSectionHeader
                     .padding(.horizontal, 10)
+                    .padding(.bottom, 4)
 
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(model.projects) { project in
@@ -74,6 +76,22 @@ struct MainSidebarPane: View {
             }
         }
         .navigationTitle("kodanto")
+    }
+
+    private var projectsSectionHeader: some View {
+        HStack(spacing: 8) {
+            sidebarSectionHeader("Projects")
+            Spacer(minLength: 0)
+            Button {
+                showAddProjectPicker()
+            } label: {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .help("Add Project")
+            .disabled(model.selectedProfile == nil)
+        }
     }
 
     private func projectSection(for project: OpenCodeProject) -> some View {
@@ -182,7 +200,31 @@ struct MainSidebarPane: View {
         Text(title.uppercased())
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
-            .padding(.bottom, 4)
+    }
+
+    private func showAddProjectPicker() {
+        let panel = NSOpenPanel()
+        panel.title = "Add Project"
+        panel.prompt = "Add Project"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = preferredProjectPickerDirectory()
+
+        guard panel.runModal() == .OK, let selectedDirectory = panel.url?.path else { return }
+        model.addProject(from: selectedDirectory)
+    }
+
+    private func preferredProjectPickerDirectory() -> URL {
+        let fileManager = FileManager.default
+        let homeDirectory = fileManager.homeDirectoryForCurrentUser
+        let programmingDirectory = homeDirectory.appendingPathComponent("Programming", isDirectory: true)
+        if fileManager.fileExists(atPath: programmingDirectory.path) {
+            return programmingDirectory
+        }
+
+        return homeDirectory
     }
 
     private func setSidebarFocus(_ item: SidebarFocusItem) {
