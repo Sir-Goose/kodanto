@@ -178,7 +178,9 @@ final class WorkspaceStore {
         statuses: [String: OpenCodeSessionStatus],
         for project: OpenCodeProject
     ) {
-        let sortedSessions = loadedSessions.sorted { $0.time.updated > $1.time.updated }
+        let sortedSessions = loadedSessions
+            .filter { !$0.isArchived }
+            .sorted { $0.time.updated > $1.time.updated }
         let previousStatuses = sessionStatusesByDirectory[project.worktree] ?? [:]
 
         sessionsByDirectory[project.worktree] = sortedSessions
@@ -219,7 +221,12 @@ final class WorkspaceStore {
         persistProjectOrder(profileID: profileID)
     }
 
-    func upsertSession(_ session: OpenCodeSession, directory: String) {
+    @discardableResult
+    func upsertSession(_ session: OpenCodeSession, directory: String) -> Bool {
+        if session.isArchived {
+            return removeSessionID(session.id, directory: directory)
+        }
+
         var cached = sessionsByDirectory[directory] ?? []
         if let index = cached.firstIndex(where: { $0.id == session.id }) {
             cached[index] = session
@@ -236,25 +243,12 @@ final class WorkspaceStore {
                 selectedSessionID = session.id
             }
         }
+
+        return false
     }
 
     func removeSession(_ session: OpenCodeSession, directory: String) -> Bool {
-        var cached = sessionsByDirectory[directory] ?? []
-        cached.removeAll { $0.id == session.id }
-        sessionsByDirectory[directory] = cached
-
-        var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
-        cachedStatuses.removeValue(forKey: session.id)
-        sessionStatusesByDirectory[directory] = cachedStatuses
-        sessionSidebarIndicators.removeSession(session.id, in: directory)
-
-        if directoryMatchesSelection(directory) {
-            applySelectedProjectCache()
-        }
-
-        guard selectedSessionID == session.id else { return false }
-        selectedSessionID = sessions.first?.id
-        return true
+        removeSessionID(session.id, directory: directory)
     }
 
     func upsertSessionStatus(_ status: OpenCodeSessionStatus, sessionID: String, directory: String) {
@@ -294,6 +288,26 @@ final class WorkspaceStore {
         let storedProjectReferences = ProjectOrderResolver.storedProjectReferences(for: projects)
         guard !storedProjectReferences.isEmpty else { return }
         projectOrderStore.save(storedProjectReferences, for: profileID)
+    }
+
+    @discardableResult
+    private func removeSessionID(_ sessionID: String, directory: String) -> Bool {
+        var cached = sessionsByDirectory[directory] ?? []
+        cached.removeAll { $0.id == sessionID }
+        sessionsByDirectory[directory] = cached
+
+        var cachedStatuses = sessionStatusesByDirectory[directory] ?? [:]
+        cachedStatuses.removeValue(forKey: sessionID)
+        sessionStatusesByDirectory[directory] = cachedStatuses
+        sessionSidebarIndicators.removeSession(sessionID, in: directory)
+
+        if directoryMatchesSelection(directory) {
+            applySelectedProjectCache()
+        }
+
+        guard selectedSessionID == sessionID else { return false }
+        selectedSessionID = sessions.first?.id
+        return true
     }
 
     private func applySelectedProjectCache() {

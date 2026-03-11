@@ -13,6 +13,12 @@ protocol OpenCodeAPIService {
     func questions(directory: String) async throws -> [OpenCodeQuestionRequest]
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope]
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession
+    func updateSession(
+        sessionID: String,
+        directory: String,
+        title: String?,
+        archivedAt: Double?
+    ) async throws -> OpenCodeSession
     func initializeGitRepository(directory: String) async throws -> OpenCodeProject
     func sendPrompt(
         sessionID: String,

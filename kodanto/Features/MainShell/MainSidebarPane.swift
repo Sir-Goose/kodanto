@@ -10,6 +10,8 @@ struct MainSidebarPane: View {
     @State private var draggedProjectID: OpenCodeProject.ID?
     @State private var projectDropTarget: ProjectDropTarget?
     @State private var sidebarFocusedItem: SidebarFocusItem?
+    @State private var renamingSessionContext: SessionActionContext?
+    @State private var renameDraftTitle = ""
     @FocusState private var isSidebarFocused: Bool
 
     private let projectDropCoordinateSpace = "project-drop-coordinate-space"
@@ -74,6 +76,20 @@ struct MainSidebarPane: View {
             if sidebarFocusedItem == nil {
                 sidebarFocusedItem = sidebarFocusableItems.first
             }
+        }
+        .sheet(item: $renamingSessionContext) { context in
+            RenameSessionSheet(
+                title: $renameDraftTitle,
+                onCancel: {
+                    renamingSessionContext = nil
+                },
+                onSave: {
+                    let nextTitle = renameDraftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !nextTitle.isEmpty else { return }
+                    model.renameSession(sessionID: context.sessionID, in: context.projectID, newTitle: nextTitle)
+                    renamingSessionContext = nil
+                }
+            )
         }
         .navigationTitle("kodanto")
     }
@@ -177,6 +193,14 @@ struct MainSidebarPane: View {
                             .buttonStyle(.plain)
                             .padding(.leading, 24)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .contextMenu {
+                                Button("Rename…") {
+                                    beginRename(session: session, in: project)
+                                }
+                                Button("Archive", role: .destructive) {
+                                    model.archiveSession(sessionID: session.id, in: project.id)
+                                }
+                            }
                         }
                     }
                 }
@@ -230,6 +254,11 @@ struct MainSidebarPane: View {
     private func setSidebarFocus(_ item: SidebarFocusItem) {
         sidebarFocusedItem = item
         isSidebarFocused = true
+    }
+
+    private func beginRename(session: OpenCodeSession, in project: OpenCodeProject) {
+        renameDraftTitle = session.title
+        renamingSessionContext = SessionActionContext(projectID: project.id, sessionID: session.id)
     }
 
     private func handleSidebarMoveCommand(_ direction: MoveCommandDirection) {
@@ -317,6 +346,13 @@ struct MainSidebarPane: View {
         guard let projectDropTarget, projectDropTarget.projectID == projectID else { return nil }
         return projectDropTarget.placement
     }
+}
+
+private struct SessionActionContext: Identifiable {
+    let projectID: OpenCodeProject.ID
+    let sessionID: OpenCodeSession.ID
+
+    var id: String { "\(projectID)|\(sessionID)" }
 }
 
 struct ProjectDropTarget: Equatable {
@@ -693,6 +729,45 @@ struct SessionSidebarIndicator: View {
             isPulsing = true
         } else {
             isPulsing = false
+        }
+    }
+}
+
+private struct RenameSessionSheet: View {
+    @Binding var title: String
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    @FocusState private var isTitleFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Rename Session")
+                .font(.headline)
+
+            TextField("Session title", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .focused($isTitleFocused)
+                .onSubmit {
+                    onSave()
+                }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    onCancel()
+                }
+                Button("Save") {
+                    onSave()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 360)
+        .onAppear {
+            isTitleFocused = true
         }
     }
 }

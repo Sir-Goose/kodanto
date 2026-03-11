@@ -1,3 +1,4 @@
+import AppKit
 import Observation
 import SwiftUI
 
@@ -7,11 +8,16 @@ struct TranscriptTurnView: View {
     let resolveTaskTarget: (String) -> KodantoAppModel.SessionNavigationTarget?
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Bindable var disclosureStore: TranscriptDisclosureStore
+    @State private var isAssistantHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if turn.user != nil {
-                UserPromptCard(parts: turn.userVisibleParts, worktreeRoot: worktreeRoot)
+                UserPromptCard(
+                    parts: turn.userVisibleParts,
+                    worktreeRoot: worktreeRoot,
+                    copyText: turn.userCopyText
+                )
             }
 
             let groups = turn.assistantPartGroups
@@ -34,6 +40,14 @@ struct TranscriptTurnView: View {
                     }
                 }
                 .padding(.leading, turn.user == nil ? 0 : 12)
+                .overlay(alignment: .topTrailing) {
+                    HoverCopyButton(
+                        text: turn.assistantCopyText,
+                        isVisible: isAssistantHovered,
+                        helpText: "Copy response"
+                    )
+                }
+                .onHover { isAssistantHovered = $0 }
             }
         }
     }
@@ -42,6 +56,8 @@ struct TranscriptTurnView: View {
 private struct UserPromptCard: View {
     let parts: [OpenCodePart]
     let worktreeRoot: String?
+    let copyText: String?
+    @State private var isHovered = false
 
     var body: some View {
         if !parts.isEmpty {
@@ -69,6 +85,60 @@ private struct UserPromptCard: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
             )
+            .overlay(alignment: .topTrailing) {
+                HoverCopyButton(
+                    text: copyText,
+                    isVisible: isHovered,
+                    helpText: "Copy prompt"
+                )
+            }
+            .onHover { isHovered = $0 }
+        }
+    }
+}
+
+private struct HoverCopyButton: View {
+    let text: String?
+    let isVisible: Bool
+    let helpText: String
+
+    @State private var didCopy = false
+    @State private var resetTask: Task<Void, Never>?
+
+    var body: some View {
+        Group {
+            if text != nil {
+                Button(action: copyToClipboard) {
+                    Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .help(didCopy ? "Copied" : helpText)
+                .opacity(isVisible ? 1 : 0)
+                .allowsHitTesting(isVisible)
+                .animation(.easeInOut(duration: 0.15), value: isVisible)
+                .onDisappear {
+                    resetTask?.cancel()
+                    resetTask = nil
+                }
+            }
+        }
+    }
+
+    private func copyToClipboard() {
+        guard let text else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+
+        didCopy = true
+        resetTask?.cancel()
+        resetTask = Task {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                didCopy = false
+            }
         }
     }
 }

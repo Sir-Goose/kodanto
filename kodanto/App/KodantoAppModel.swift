@@ -19,11 +19,14 @@ final class KodantoAppModel {
 
     private enum RequestActionError: LocalizedError {
         case missingSelection
+        case missingProject
 
         var errorDescription: String? {
             switch self {
             case .missingSelection:
                 return "Select a connected session before responding."
+            case .missingProject:
+                return "Select a connected project before performing this action."
             }
         }
     }
@@ -438,6 +441,71 @@ final class KodantoAppModel {
         }
     }
 
+    func renameSession(
+        sessionID: OpenCodeSession.ID,
+        in projectID: OpenCodeProject.ID,
+        newTitle: String
+    ) {
+        Task {
+            do {
+                try await submitSessionRename(sessionID: sessionID, in: projectID, newTitle: newTitle)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func archiveSession(
+        sessionID: OpenCodeSession.ID,
+        in projectID: OpenCodeProject.ID
+    ) {
+        Task {
+            do {
+                try await submitSessionArchive(sessionID: sessionID, in: projectID)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func submitSessionRename(
+        sessionID: OpenCodeSession.ID,
+        in projectID: OpenCodeProject.ID,
+        newTitle: String
+    ) async throws {
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        let (client, project) = try actionContext(for: projectID)
+        let updated = try await client.updateSession(
+            sessionID: sessionID,
+            directory: project.worktree,
+            title: trimmed,
+            archivedAt: nil
+        )
+        _ = workspaceStore.upsertSession(updated, directory: project.worktree)
+    }
+
+    func submitSessionArchive(
+        sessionID: OpenCodeSession.ID,
+        in projectID: OpenCodeProject.ID
+    ) async throws {
+        let (client, project) = try actionContext(for: projectID)
+        let archivedAt = Date().timeIntervalSince1970 * 1000
+        let updated = try await client.updateSession(
+            sessionID: sessionID,
+            directory: project.worktree,
+            title: nil,
+            archivedAt: archivedAt
+        )
+
+        let selectionChanged = workspaceStore.upsertSession(updated, directory: project.worktree)
+        guard selectionChanged else { return }
+
+        syncSelectionContext(resetSessionState: true)
+        try await loadSessionDetail(using: client)
+    }
+
     func addProject(from directory: String) {
         Task {
             guard let profile = selectedProfile else { return }
@@ -581,6 +649,18 @@ final class KodantoAppModel {
         }
 
         return (dependencies.apiFactory.makeService(profile: profile), project.worktree)
+    }
+
+    private func actionContext(for projectID: OpenCodeProject.ID) throws -> (client: OpenCodeAPIService, project: OpenCodeProject) {
+        guard let profile = selectedProfile else {
+            throw RequestActionError.missingSelection
+        }
+
+        guard let project = projects.first(where: { $0.id == projectID }) else {
+            throw RequestActionError.missingProject
+        }
+
+        return (dependencies.apiFactory.makeService(profile: profile), project)
     }
 
     private func refreshAll(using client: OpenCodeAPIService, scope: RefreshScope) async throws {

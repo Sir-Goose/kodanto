@@ -5,6 +5,8 @@ struct TranscriptTurn: Identifiable, Hashable {
     let assistantMessages: [OpenCodeMessageEnvelope]
     let userVisibleParts: [OpenCodePart]
     let assistantPartGroups: [AssistantPartGroup]
+    let userCopyText: String?
+    let assistantCopyText: String?
 
     var id: String {
         user?.id ?? assistantMessages.first?.id ?? "transcript-turn"
@@ -15,6 +17,8 @@ struct TranscriptTurn: Identifiable, Hashable {
         self.assistantMessages = assistantMessages
         userVisibleParts = user?.parts.filter(\.isVisibleInUserTurn) ?? []
         assistantPartGroups = AssistantPartGroup.build(from: assistantMessages)
+        userCopyText = TranscriptTurn.resolveUserCopyText(from: userVisibleParts)
+        assistantCopyText = TranscriptTurn.resolveAssistantCopyText(from: assistantMessages)
     }
 
     static func build(from messages: [OpenCodeMessageEnvelope]) -> [TranscriptTurn] {
@@ -51,6 +55,23 @@ struct TranscriptTurn: Identifiable, Hashable {
 
         flushCurrentUser()
         return turns
+    }
+
+    private static func resolveUserCopyText(from parts: [OpenCodePart]) -> String? {
+        let lines = parts.compactMap(\.copyableText)
+        guard !lines.isEmpty else { return nil }
+        return lines.joined(separator: "\n\n")
+    }
+
+    private static func resolveAssistantCopyText(from messages: [OpenCodeMessageEnvelope]) -> String? {
+        for message in messages.reversed() {
+            for part in message.parts.reversed() {
+                if let text = part.copyableText {
+                    return text
+                }
+            }
+        }
+        return nil
     }
 }
 
@@ -148,6 +169,12 @@ extension OpenCodePart {
     var contextTool: OpenCodePart.Tool? {
         guard case .tool(let tool) = self, transcriptContextToolNames.contains(tool.tool) else { return nil }
         return tool
+    }
+
+    var copyableText: String? {
+        guard case .text(let value) = self else { return nil }
+        let trimmed = value.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

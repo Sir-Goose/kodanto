@@ -75,6 +75,31 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func updateSession(
+        sessionID: String,
+        directory: String,
+        title: String?,
+        archivedAt: Double?
+    ) async throws -> OpenCodeSession {
+        struct Body: Encodable {
+            struct Time: Encodable {
+                let archived: Double?
+            }
+
+            let title: String?
+            let time: Time?
+        }
+
+        return try await patchSession(
+            sessionID: sessionID,
+            directory: directory,
+            body: Body(
+                title: title,
+                time: archivedAt.map { Body.Time(archived: $0) }
+            )
+        )
+    }
+
     func initializeGitRepository(directory: String) async throws -> OpenCodeProject {
         try await request(
             path: "/project/git/init",
@@ -161,6 +186,19 @@ struct OpenCodeAPIClient {
         }
 
         return data
+    }
+
+    private func patchSession<T: Encodable>(
+        sessionID: String,
+        directory: String,
+        body: T
+    ) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)",
+            method: "PATCH",
+            directory: directory,
+            body: AnyEncodable(body)
+        )
     }
 
     private func makeRequest(
