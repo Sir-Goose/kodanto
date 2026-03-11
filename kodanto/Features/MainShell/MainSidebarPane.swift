@@ -9,6 +9,7 @@ struct MainSidebarPane: View {
     @State private var projectHeaderFrames: [OpenCodeProject.ID: CGRect] = [:]
     @State private var draggedProjectID: OpenCodeProject.ID?
     @State private var projectDropTarget: ProjectDropTarget?
+    @State private var hoveredProjectID: OpenCodeProject.ID?
     @State private var sidebarFocusedItem: SidebarFocusItem?
     @State private var renamingSessionContext: SessionActionContext?
     @State private var renameDraftTitle = ""
@@ -114,13 +115,20 @@ struct MainSidebarPane: View {
         let isExpanded = expandedProjectIDs.contains(project.id)
         let sessions = model.sessions(for: project)
         let projectFocusItem = SidebarFocusItem.project(project.id)
+        let showNewSessionButton = hoveredProjectID == project.id
 
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 ProjectSidebarRow(
                     project: project,
                     isExpanded: isExpanded,
-                    dropPlacement: dropPlacement(for: project.id)
+                    dropPlacement: dropPlacement(for: project.id),
+                    showsNewSessionButton: showNewSessionButton,
+                    canCreateSession: model.selectedProfile != nil,
+                    onCreateSession: {
+                        expandedProjectIDs.insert(project.id)
+                        model.createSession(in: project.id)
+                    }
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -136,18 +144,13 @@ struct MainSidebarPane: View {
                     ProgressView()
                         .controlSize(.small)
                 }
-
-                Button {
-                    expandedProjectIDs.insert(project.id)
-                    model.createSession(in: project.id)
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.tint)
+            }
+            .onHover { hovering in
+                if hovering {
+                    hoveredProjectID = project.id
+                } else if hoveredProjectID == project.id {
+                    hoveredProjectID = nil
                 }
-                .buttonStyle(.plain)
-                .help("New Session")
-                .disabled(model.selectedProfile == nil)
             }
             .background {
                 GeometryReader { proxy in
@@ -574,6 +577,9 @@ struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
     let dropPlacement: ProjectDropPlacement?
+    let showsNewSessionButton: Bool
+    let canCreateSession: Bool
+    let onCreateSession: () -> Void
     @State private var isHovered = false
 
     var body: some View {
@@ -593,6 +599,17 @@ struct ProjectSidebarRow: View {
                 .foregroundStyle(.primary)
 
             Spacer(minLength: 0)
+
+            Button(action: onCreateSession) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+            .help("New Session")
+            .disabled(!canCreateSession)
+            .opacity(showsNewSessionButton ? 1 : 0)
+            .allowsHitTesting(showsNewSessionButton)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
