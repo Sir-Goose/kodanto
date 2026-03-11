@@ -133,48 +133,48 @@ struct MainSessionDetailPane: View {
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
 
-        return HStack(alignment: .bottom, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                ZStack(alignment: .topLeading) {
-                    AutoSizingPromptEditor(
-                        text: $model.draftPrompt,
-                        measuredHeight: $promptEditorHeight,
-                        font: Self.composerNSFont,
-                        textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
-                        maxHeight: maxHeight
-                    ) {
-                        guard model.canSendPrompt else { return }
-                        model.sendPrompt()
-                    }
-                    .frame(height: resolvedPromptHeight)
-
-                    if model.draftPrompt.isEmpty {
-                        Text("Write a prompt...")
-                            .font(.system(.body, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, Self.composerHorizontalPadding)
-                            .padding(.vertical, Self.composerVerticalPadding)
-                            .allowsHitTesting(false)
-                    }
+        return VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                AutoSizingPromptEditor(
+                    text: $model.draftPrompt,
+                    measuredHeight: $promptEditorHeight,
+                    font: Self.composerNSFont,
+                    textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
+                    maxHeight: maxHeight
+                ) {
+                    guard model.canSendPrompt else { return }
+                    model.sendPrompt()
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .frame(height: resolvedPromptHeight, alignment: .topLeading)
+                .frame(height: resolvedPromptHeight)
 
-                ComposerControlsRow(model: model)
+                if model.draftPrompt.isEmpty {
+                    Text("Write a prompt...")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, Self.composerHorizontalPadding)
+                        .padding(.vertical, Self.composerVerticalPadding)
+                        .allowsHitTesting(false)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: resolvedPromptHeight, alignment: .topLeading)
 
-            Button {
-                model.sendPrompt()
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 34, height: 34)
+            HStack(alignment: .center, spacing: 12) {
+                ComposerControlsRow(model: model)
+
+                Button {
+                    model.sendPrompt()
+                } label: {
+                    Image(systemName: "paperplane.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.circle)
+                .controlSize(.regular)
+                .disabled(!model.canSendPrompt)
+                .help("Send")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .disabled(!model.canSendPrompt)
-            .help("Send")
         }
         .padding(Self.composerInnerPadding)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
