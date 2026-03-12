@@ -211,6 +211,132 @@ final class ComposerAgentSelectionTests: XCTestCase {
     }
 }
 
+@MainActor
+final class SessionUnreadModelTests: XCTestCase {
+    private static var retainedModels: [KodantoAppModel] = []
+
+    func testMarkSessionUnreadUpdatesIndicatorWithoutCallingUpdateSession() {
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let session = TestFixtures.session(
+            id: "session-1",
+            projectID: project.id,
+            directory: project.worktree,
+            title: "Session",
+            updatedAt: 200
+        )
+
+        let service = SessionUnreadMockAPIService()
+        let model = makeModel(apiService: service)
+        model.workspaceStore.applyLoadedProjects([project], profileID: model.selectedProfileID)
+        model.workspaceStore.selectProject(project.id)
+        model.workspaceStore.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+
+        XCTAssertEqual(model.sessionSidebarIndicator(for: session, in: project), .none)
+        model.markSessionUnread(sessionID: session.id, in: project.id)
+
+        XCTAssertEqual(model.sessionSidebarIndicator(for: session, in: project), .completedUnread)
+        XCTAssertEqual(service.updateCallCount, 0)
+    }
+
+    private func makeModel(apiService: SessionUnreadMockAPIService) -> KodantoAppModel {
+        let profile = ServerProfile(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000321") ?? UUID(),
+            name: "Test",
+            kind: .remote,
+            baseURL: "http://localhost:4096",
+            username: "opencode",
+            password: "pw"
+        )
+        let defaults = UserDefaults(suiteName: "kodanto-tests-\(UUID().uuidString)")!
+
+        let dependencies = KodantoAppDependencies(
+            sidecar: SessionUnreadTestSidecarController(),
+            apiFactory: SessionUnreadAPIServiceFactory(service: apiService),
+            sseStreamProvider: SessionUnreadSSEStreamProvider(),
+            profileStore: SessionUnreadProfileStore(profiles: [profile]),
+            modelSelectionStore: ModelSelectionStore(userDefaults: defaults),
+            modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: defaults),
+            permissionAutoAcceptStore: PermissionAutoAcceptStore(userDefaults: defaults),
+            projectOrderStore: ProjectOrderStore(userDefaults: defaults),
+            clock: SessionUnreadTestClock()
+        )
+
+        let model = KodantoAppModel(dependencies: dependencies)
+        Self.retainedModels.append(model)
+        return model
+    }
+}
+
+@MainActor
+final class SessionUnreadWorkspaceStoreTests: XCTestCase {
+    private static var retainedStores: [WorkspaceStore] = []
+
+    func testMarkUnreadIdleSessionSetsCompletedUnreadIndicator() {
+        let store = makeStore()
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
+
+        store.applyLoadedProjects([project], profileID: nil)
+        store.selectProject(project.id)
+        store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+
+        store.markSessionUnread(session.id, in: project.id)
+        XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .completedUnread)
+    }
+
+    func testSelectingMarkedUnreadSessionClearsIndicator() {
+        let store = makeStore()
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
+
+        store.applyLoadedProjects([project], profileID: nil)
+        store.selectProject(project.id)
+        store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+        store.markSessionUnread(session.id, in: project.id)
+
+        _ = store.selectSession(session.id, in: project.id)
+        XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .none)
+    }
+
+    func testMarkUnreadDoesNotOverrideRunningIndicator() {
+        let store = makeStore()
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let selectedSession = TestFixtures.session(id: "selected", directory: project.worktree, updatedAt: 300)
+        let runningSession = TestFixtures.session(id: "running", directory: project.worktree, updatedAt: 200)
+
+        store.applyLoadedProjects([project], profileID: nil)
+        store.selectProject(project.id)
+        store.applyLoadedSessions(
+            [selectedSession, runningSession],
+            statuses: [selectedSession.id: .idle, runningSession.id: .busy],
+            for: project
+        )
+
+        XCTAssertEqual(store.sessionSidebarIndicator(for: runningSession, in: project), .running)
+        store.markSessionUnread(runningSession.id, in: project.id)
+        XCTAssertEqual(store.sessionSidebarIndicator(for: runningSession, in: project), .running)
+    }
+
+    func testMarkUnreadMissingSessionIsNoOp() {
+        let store = makeStore()
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
+
+        store.applyLoadedProjects([project], profileID: nil)
+        store.selectProject(project.id)
+        store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+
+        store.markSessionUnread("missing-session", in: project.id)
+        XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .none)
+    }
+
+    private func makeStore() -> WorkspaceStore {
+        let store = WorkspaceStore(projectOrderStore: SessionUnreadProjectOrderStore())
+        Self.retainedStores.append(store)
+        return store
+    }
+}
+
 private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     struct PromptCall {
         let sessionID: String
@@ -270,4 +396,82 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }
+}
+
+private final class SessionUnreadMockAPIService: OpenCodeAPIService {
+    private(set) var updateCallCount = 0
+
+    func health() async throws -> OpenCodeHealth { fatalError("unused") }
+    func pathInfo(directory: String?) async throws -> OpenCodePathInfo { fatalError("unused") }
+    func config(directory: String?) async throws -> OpenCodeConfig { fatalError("unused") }
+    func configProviders(directory: String?) async throws -> OpenCodeConfigProviders { fatalError("unused") }
+    func agents() async throws -> [OpenCodeAgent] { fatalError("unused") }
+    func projects() async throws -> [OpenCodeProject] { fatalError("unused") }
+    func sessions(directory: String) async throws -> [OpenCodeSession] { fatalError("unused") }
+    func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus] { fatalError("unused") }
+    func sessionTodos(sessionID: String, directory: String) async throws -> [OpenCodeTodo] { fatalError("unused") }
+    func permissions(directory: String) async throws -> [OpenCodePermissionRequest] { fatalError("unused") }
+    func questions(directory: String) async throws -> [OpenCodeQuestionRequest] { fatalError("unused") }
+    func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
+    func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
+    func updateSession(
+        sessionID: String,
+        directory: String,
+        title: String?,
+        archivedAt: Double?
+    ) async throws -> OpenCodeSession {
+        updateCallCount += 1
+        return TestFixtures.session(id: sessionID, directory: directory, updatedAt: Date().timeIntervalSince1970)
+    }
+    func initializeGitRepository(directory: String) async throws -> OpenCodeProject { fatalError("unused") }
+    func sendPrompt(
+        sessionID: String,
+        directory: String,
+        text: String,
+        model: PromptRequestBody.ModelSelection?,
+        agent: String?,
+        variant: String?
+    ) async throws { fatalError("unused") }
+    func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
+    func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
+    func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }
+}
+
+private struct SessionUnreadAPIServiceFactory: OpenCodeAPIServiceFactory {
+    let service: OpenCodeAPIService
+    func makeService(profile: ServerProfile) -> OpenCodeAPIService { service }
+}
+
+private struct SessionUnreadSSEStreamProvider: OpenCodeSSEStreamProviding {
+    func streamGlobalEvents(for profile: ServerProfile) -> AsyncThrowingStream<OpenCodeGlobalEvent, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.finish()
+        }
+    }
+}
+
+private struct SessionUnreadProfileStore: ServerProfileStoring {
+    var profiles: [ServerProfile]
+    func load() -> [ServerProfile] { profiles }
+    func save(_ profiles: [ServerProfile]) {}
+}
+
+private final class SessionUnreadTestSidecarController: SidecarControlling {
+    func restart(profile: ServerProfile) async throws {}
+    func stop() {}
+    func setOutputHandler(_ handler: @escaping (String) -> Void) {}
+    func executablePath() throws -> String { "opencode" }
+    func executableVersion() throws -> String { "test" }
+    func versionsMatch(_ lhs: String, _ rhs: String) -> Bool { lhs == rhs }
+}
+
+private struct SessionUnreadTestClock: AppClock {
+    var now: Date { .now }
+    func sleep(for duration: Duration) async throws {}
+}
+
+private struct SessionUnreadProjectOrderStore: ProjectOrderStoring {
+    func load(for profileID: UUID) -> [String] { [] }
+    func save(_ projectIDs: [String], for profileID: UUID) {}
+    func remove(for profileID: UUID) {}
 }

@@ -407,6 +407,12 @@ struct SessionSidebarIndicatorStore {
         statesByDirectory[directory] = states
     }
 
+    mutating func markUnread(for sessionID: String, in directory: String) {
+        var states = statesByDirectory[directory] ?? [:]
+        states[sessionID] = .completedUnread
+        statesByDirectory[directory] = states
+    }
+
     mutating func removeSession(_ sessionID: String, in directory: String) {
         clearIndicator(for: sessionID, in: directory)
     }
@@ -473,7 +479,7 @@ enum OpenCodeSessionStatus: Decodable, Hashable {
 
 }
 
-private extension OpenCodeSessionStatus {
+extension OpenCodeSessionStatus {
     var isRunning: Bool {
         switch self {
         case .busy, .retry:

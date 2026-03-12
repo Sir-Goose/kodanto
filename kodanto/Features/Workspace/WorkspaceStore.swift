@@ -46,13 +46,7 @@ final class WorkspaceStore {
         guard let status = sessionStatusesByDirectory[selectedProject.worktree]?[selectedSessionID] else {
             return false
         }
-
-        switch status {
-        case .busy, .retry:
-            return true
-        case .idle:
-            return false
-        }
+        return status.isRunning
     }
 
     func reset() {
@@ -72,6 +66,20 @@ final class WorkspaceStore {
 
     func sessionSidebarIndicator(for session: OpenCodeSession, in project: OpenCodeProject) -> SessionSidebarIndicatorState {
         sessionSidebarIndicators.indicator(for: session.id, in: project.worktree)
+    }
+
+    func canMarkSessionUnread(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) -> Bool {
+        guard let project = project(for: projectID) else { return false }
+        guard let session = sessionsByDirectory[project.worktree]?.first(where: { $0.id == sessionID }) else { return false }
+        guard !session.isArchived else { return false }
+        guard sessionSidebarIndicators.indicator(for: sessionID, in: project.worktree) != .completedUnread else { return false }
+        let status = sessionStatusesByDirectory[project.worktree]?[sessionID] ?? .idle
+        return !status.isRunning
+    }
+
+    func markSessionUnread(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
+        guard canMarkSessionUnread(sessionID, in: projectID), let project = project(for: projectID) else { return }
+        sessionSidebarIndicators.markUnread(for: sessionID, in: project.worktree)
     }
 
     func hasLoadedSessions(for project: OpenCodeProject) -> Bool {

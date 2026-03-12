@@ -215,6 +215,8 @@ struct MainSidebarPane: View {
                             let focusItem = SidebarFocusItem.session(projectID: project.id, sessionID: session.id)
                             let sessionContext = SessionActionContext(projectID: project.id, sessionID: session.id)
                             let isSessionHovered = hoveredSessionContext == sessionContext
+                            let indicator = model.sessionSidebarIndicator(for: session, in: project)
+                            let canMarkUnread = model.canMarkSessionUnread(sessionID: session.id, in: project.id)
 
                             ZStack(alignment: .trailing) {
                                 Button {
@@ -223,7 +225,7 @@ struct MainSidebarPane: View {
                                 } label: {
                                     SessionSidebarRow(
                                         session: session,
-                                        indicator: model.sessionSidebarIndicator(for: session, in: project),
+                                        indicator: indicator,
                                         isSelected: model.selectedSessionID == session.id,
                                         isFocused: sidebarFocusedItem == focusItem,
                                         showsRecency: !isSessionHovered,
@@ -259,6 +261,10 @@ struct MainSidebarPane: View {
                             }
                             .animation(.easeInOut(duration: 0.12), value: isSessionHovered)
                             .contextMenu {
+                                Button("Mark as unread") {
+                                    model.markSessionUnread(sessionID: session.id, in: project.id)
+                                }
+                                .disabled(!canMarkUnread)
                                 Button("Rename…") {
                                     beginRename(session: session, in: project)
                                 }

@@ -413,6 +413,14 @@ final class KodantoAppModel {
         workspaceStore.sessionSidebarIndicator(for: session, in: project)
     }
 
+    func canMarkSessionUnread(sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) -> Bool {
+        workspaceStore.canMarkSessionUnread(sessionID, in: projectID)
+    }
+
+    func markSessionUnread(sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
+        workspaceStore.markSessionUnread(sessionID, in: projectID)
+    }
+
     func hasLoadedSessions(for project: OpenCodeProject) -> Bool {
         workspaceStore.hasLoadedSessions(for: project)
     }
