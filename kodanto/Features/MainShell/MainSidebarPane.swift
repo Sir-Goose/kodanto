@@ -236,10 +236,11 @@ struct MainSidebarPane: View {
                                     Button {
                                         archiveConfirmationContext = sessionContext
                                     } label: {
-                                        Image(systemName: "archivebox")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.secondary)
-                                            .frame(width: SessionSidebarRow.trailingAccessoryWidth, alignment: .trailing)
+                                        SessionSidebarRow.trailingAccessorySlot {
+                                            Image(systemName: "archivebox")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                     .buttonStyle(.plain)
                                     .help("Archive Session")
@@ -709,7 +710,7 @@ struct ProjectSidebarRow: View {
 }
 
 struct SessionSidebarRow: View {
-    static let trailingAccessoryWidth: CGFloat = 60
+    static let trailingAccessoryTemplateToken = SessionRecencyFormatter.maxLayoutToken
 
     let session: OpenCodeSession
     let indicator: SessionSidebarIndicatorState
@@ -717,6 +718,15 @@ struct SessionSidebarRow: View {
     let isFocused: Bool
     let showsRecency: Bool
     let isHovered: Bool
+
+    static func trailingAccessorySlot<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        SessionSidebarTrailingAccessorySlot(
+            templateToken: trailingAccessoryTemplateToken,
+            content: content
+        )
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -726,25 +736,24 @@ struct SessionSidebarRow: View {
                 .font(.callout.weight(isSelected ? .semibold : .regular))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-                .layoutPriority(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            Spacer(minLength: 0)
-
-            if showsRecency {
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
-                        .font(.caption)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .frame(width: Self.trailingAccessoryWidth, alignment: .trailing)
+            Self.trailingAccessorySlot {
+                if showsRecency {
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Color.clear
+                        .frame(height: 1)
+                        .accessibilityHidden(true)
                 }
-            } else {
-                Color.clear
-                    .frame(width: Self.trailingAccessoryWidth, height: 1)
-                    .accessibilityHidden(true)
             }
+            .layoutPriority(1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -762,6 +771,34 @@ struct SessionSidebarRow: View {
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+private struct SessionSidebarTrailingAccessorySlot<Content: View>: View {
+    let templateToken: String
+    let content: Content
+
+    init(
+        templateToken: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.templateToken = templateToken
+        self.content = content()
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Text(templateToken)
+                .font(.caption)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .hidden()
+                .accessibilityHidden(true)
+
+            content
+        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 

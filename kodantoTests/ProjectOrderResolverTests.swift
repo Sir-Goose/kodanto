@@ -52,3 +52,36 @@ final class ProjectOrderResolverTests: XCTestCase {
         XCTAssertTrue(ProjectOrderResolver.matchesProjectLocation("/tmp/project", "/tmp/./project"))
     }
 }
+
+final class SessionRecencyFormatterTests: XCTestCase {
+    func testRecencyBoundaryTransitions() {
+        XCTAssertEqual(formatted(elapsed: 59 * minute), "59m")
+        XCTAssertEqual(formatted(elapsed: 60 * minute), "1h")
+        XCTAssertEqual(formatted(elapsed: 24 * hour), "1d")
+        XCTAssertEqual(formatted(elapsed: 7 * day), "1w")
+        XCTAssertEqual(formatted(elapsed: 52 * week), "1y")
+    }
+
+    func testRecencyUsesYearsForMultiYearElapsedTime() {
+        XCTAssertEqual(formatted(elapsed: 104 * week), "2y")
+    }
+
+    func testRecencyCapsAtNinetyNineYearsPlus() {
+        XCTAssertEqual(formatted(elapsed: 100 * 52 * week), "99y+")
+    }
+
+    func testSidebarTemplateTokenStaysInSyncWithFormatterMaxToken() {
+        XCTAssertEqual(SessionSidebarRow.trailingAccessoryTemplateToken, SessionRecencyFormatter.maxLayoutToken)
+    }
+
+    private func formatted(elapsed: TimeInterval) -> String {
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+        let timestamp = now.addingTimeInterval(-elapsed).timeIntervalSince1970
+        return SessionRecencyFormatter.string(since: timestamp, now: now)
+    }
+
+    private let minute: TimeInterval = 60
+    private let hour: TimeInterval = 60 * 60
+    private let day: TimeInterval = 24 * 60 * 60
+    private let week: TimeInterval = 7 * 24 * 60 * 60
+}

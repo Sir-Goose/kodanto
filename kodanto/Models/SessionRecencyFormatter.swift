@@ -5,8 +5,12 @@ enum SessionRecencyFormatter {
     private static let hour: TimeInterval = 60 * minute
     private static let day: TimeInterval = 24 * hour
     private static let week: TimeInterval = 7 * day
+    private static let year: TimeInterval = 52 * week
     private static let millisecondsThreshold = 10_000_000_000.0
     private static let futureTolerance: TimeInterval = 24 * hour
+    private static let maxDisplayYears = 99
+
+    static let maxLayoutToken = "\(maxDisplayYears)y+"
 
     static func string(since timestamp: Double, now: Date = .now) -> String {
         let elapsed = max(0, now.timeIntervalSince(normalizedDate(from: timestamp, now: now)))
@@ -23,7 +27,16 @@ enum SessionRecencyFormatter {
             return "\(Int(elapsed / day))d"
         }
 
-        return "\(Int(elapsed / week))w"
+        if elapsed < year {
+            return "\(Int(elapsed / week))w"
+        }
+
+        let years = Int(elapsed / year)
+        if years > maxDisplayYears {
+            return maxLayoutToken
+        }
+
+        return "\(max(1, years))y"
     }
 
     private static func normalizedDate(from timestamp: Double, now: Date) -> Date {
