@@ -12,6 +12,8 @@ final class ComposerStore {
     var availableModelGroups: [OpenCodeModelProviderGroup] = []
     var selectedModelID: String?
     var selectedModelVariant: String?
+    var availablePrimaryAgents: [OpenCodeAgent] = []
+    var selectedAgentName: String?
     var isLoadingModels = false
     var modelLoadError: String?
     var draftPrompt = ""
@@ -51,6 +53,10 @@ final class ComposerStore {
         return selectedModelVariant
     }
 
+    var selectedPromptAgent: String? {
+        resolvedAgentSelection(selectedAgentName, availableAgents: availablePrimaryAgents)
+    }
+
     func updateSelectedProfile(_ profileID: UUID?) {
         selectedProfileID = profileID
         selectedModelID = profileID.flatMap { modelSelectionStore.load(for: $0) }
@@ -60,12 +66,16 @@ final class ComposerStore {
             selectedModelVariant = nil
         }
         availableModelGroups = []
+        availablePrimaryAgents = []
+        selectedAgentName = nil
         isLoadingModels = false
         modelLoadError = nil
     }
 
     func clearModelCatalog() {
         availableModelGroups = []
+        availablePrimaryAgents = []
+        selectedAgentName = nil
         isLoadingModels = false
         modelLoadError = nil
     }
@@ -94,6 +104,19 @@ final class ComposerStore {
         }
     }
 
+    func selectAgent(_ agentName: String?) {
+        selectedAgentName = resolvedAgentSelection(agentName, availableAgents: availablePrimaryAgents)
+            ?? availablePrimaryAgents.first?.name
+    }
+
+    func syncSelectedAgent(from messages: [OpenCodeMessageEnvelope]) {
+        guard let latestUserAgent = latestUserAgentName(in: messages) else { return }
+
+        selectedAgentName = resolvedAgentSelection(latestUserAgent, availableAgents: availablePrimaryAgents)
+            ?? resolvedAgentSelection(selectedAgentName, availableAgents: availablePrimaryAgents)
+            ?? availablePrimaryAgents.first?.name
+    }
+
     func refreshModelCatalog(using client: OpenCodeAPIService) async throws {
         isLoadingModels = true
         modelLoadError = nil
@@ -105,6 +128,8 @@ final class ComposerStore {
         let config = try await configTask
         let providersResponse = try await providersTask
         applyModelCatalog(resolvedModelCatalog(config: config, providersResponse: providersResponse))
+        let agents = (try? await client.agents()) ?? []
+        applyAgentCatalog(agents.filter(\.isPrimaryVisible))
     }
 
     func submitPrompt(
@@ -123,6 +148,7 @@ final class ComposerStore {
                 directory: project.worktree,
                 text: text,
                 model: selectedModelSelection,
+                agent: selectedPromptAgent,
                 variant: selectedPromptVariant
             )
             try await reload()
@@ -209,6 +235,15 @@ final class ComposerStore {
         }
     }
 
+    private func applyAgentCatalog(_ agents: [OpenCodeAgent]) {
+        if availablePrimaryAgents != agents {
+            availablePrimaryAgents = agents
+        }
+
+        selectedAgentName = resolvedAgentSelection(selectedAgentName, availableAgents: agents)
+            ?? agents.first?.name
+    }
+
     private func normalizedModelIdentifier(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
             return nil
@@ -222,6 +257,27 @@ final class ComposerStore {
         }
         guard availableVariants.contains(value) else { return nil }
         return value
+    }
+
+    private func resolvedAgentSelection(_ value: String?, availableAgents: [OpenCodeAgent]) -> String? {
+        guard let value = normalizedAgentName(value) else { return nil }
+        guard availableAgents.contains(where: { $0.name == value }) else { return nil }
+        return value
+    }
+
+    private func normalizedAgentName(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value
+    }
+
+    private func latestUserAgentName(in messages: [OpenCodeMessageEnvelope]) -> String? {
+        for envelope in messages.reversed() {
+            guard case .user(let user) = envelope.info else { continue }
+            return normalizedAgentName(user.agent)
+        }
+        return nil
     }
 
     private func resolvedProviderDefaultModelID(

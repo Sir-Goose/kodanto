@@ -201,6 +201,14 @@ final class KodantoAppModel {
         composerStore.selectedPromptVariant
     }
 
+    var availablePromptAgents: [OpenCodeAgent] {
+        composerStore.availablePrimaryAgents
+    }
+
+    var selectedPromptAgentName: String? {
+        composerStore.selectedPromptAgent
+    }
+
     var canCreateSession: Bool {
         selectedProject != nil && selectedProfile != nil
     }
@@ -315,6 +323,10 @@ final class KodantoAppModel {
 
     func selectModelVariant(_ variant: String?) {
         composerStore.selectModelVariant(variant)
+    }
+
+    func selectPromptAgent(_ agentName: String?) {
+        composerStore.selectAgent(agentName)
     }
 
     func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int) {
@@ -772,6 +784,7 @@ final class KodantoAppModel {
 
         sessionDetailStore.replaceMessages(loadedMessages)
         sessionDetailStore.replaceSessionTodos(loadedTodos)
+        composerStore.syncSelectedAgent(from: loadedMessages)
     }
 
     private func startLiveSync(for profile: ServerProfile) {
@@ -799,6 +812,8 @@ final class KodantoAppModel {
             sessionDetailStore: sessionDetailStore,
             sessionRequestStore: sessionRequestStore
         )
+
+        composerStore.syncSelectedAgent(from: sessionDetailStore.selectedSessionMessages)
 
         if effects.contains(.refresh) {
             refresh()

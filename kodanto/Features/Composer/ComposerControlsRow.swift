@@ -67,6 +67,7 @@ struct ComposerControlsRow: View {
                     .foregroundStyle(.secondary)
             }
 
+            AgentPicker(model: model)
             PermissionAutoAcceptToggle(model: model)
             Spacer(minLength: 0)
         }
@@ -79,6 +80,123 @@ struct ComposerControlsRow: View {
         }
 
         return isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+struct AgentPicker: View {
+    @Bindable var model: KodantoAppModel
+    @State private var isHovered = false
+    @State private var isShowingPicker = false
+
+    private var selectionLabel: String {
+        model.selectedPromptAgentName ?? "Default Agent"
+    }
+
+    private var hasAgents: Bool {
+        !model.availablePromptAgents.isEmpty
+    }
+
+    private var helpText: String {
+        if hasAgents {
+            return "Select agent"
+        }
+        return "No primary agents available. Prompts will use the server default agent."
+    }
+
+    var body: some View {
+        Button {
+            isShowingPicker.toggle()
+        } label: {
+            HStack(spacing: 8) {
+                Text(selectionLabel)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(backgroundColor, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .animation(.easeInOut(duration: 0.12), value: isHovered)
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .disabled(!hasAgents)
+        .help(helpText)
+        .accessibilityIdentifier("agent-picker")
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .popover(isPresented: $isShowingPicker, arrowEdge: .bottom) {
+            AgentPickerPopover(
+                agents: model.availablePromptAgents,
+                selectedAgentName: model.selectedPromptAgentName
+            ) { agentName in
+                model.selectPromptAgent(agentName)
+                isShowingPicker = false
+            }
+        }
+    }
+
+    private struct AgentPickerPopover: View {
+        let agents: [OpenCodeAgent]
+        let selectedAgentName: String?
+        let onSelect: (String) -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(agents, id: \.id) { agent in
+                    Button {
+                        onSelect(agent.name)
+                    } label: {
+                        optionRow(agent, isSelected: selectedAgentName == agent.name)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(10)
+            .frame(width: 240, alignment: .leading)
+        }
+
+        @ViewBuilder
+        private func optionRow(_ agent: OpenCodeAgent, isSelected: Bool) -> some View {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(agent.name)
+                        .font(.callout.weight(isSelected ? .medium : .regular))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    if let description = agent.description, !description.isEmpty {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .background(Color.clear, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+    }
+
+    private var backgroundColor: Color {
+        isHovered ? Color.secondary.opacity(0.08) : .clear
     }
 }
 

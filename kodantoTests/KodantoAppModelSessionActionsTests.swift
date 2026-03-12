@@ -160,6 +160,7 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         let directory: String
         let text: String
         let model: PromptRequestBody.ModelSelection?
+        let agent: String?
         let variant: String?
     }
 
@@ -237,6 +238,7 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
     func pathInfo(directory: String?) async throws -> OpenCodePathInfo { fatalError("unused") }
     func config(directory: String?) async throws -> OpenCodeConfig { fatalError("unused") }
     func configProviders(directory: String?) async throws -> OpenCodeConfigProviders { fatalError("unused") }
+    func agents() async throws -> [OpenCodeAgent] { [] }
     func projects() async throws -> [OpenCodeProject] { fatalError("unused") }
     func sessions(directory: String) async throws -> [OpenCodeSession] { fatalError("unused") }
     func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus] { fatalError("unused") }
@@ -269,9 +271,10 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         directory: String,
         text: String,
         model: PromptRequestBody.ModelSelection?,
+        agent: String?,
         variant: String?
     ) async throws {
-        promptCalls.append(.init(sessionID: sessionID, directory: directory, text: text, model: model, variant: variant))
+        promptCalls.append(.init(sessionID: sessionID, directory: directory, text: text, model: model, agent: agent, variant: variant))
 
         let createdAt = Date().timeIntervalSince1970
         let messageID = "message-\(UUID().uuidString)"

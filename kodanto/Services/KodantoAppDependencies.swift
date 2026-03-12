@@ -5,6 +5,7 @@ protocol OpenCodeAPIService {
     func pathInfo(directory: String?) async throws -> OpenCodePathInfo
     func config(directory: String?) async throws -> OpenCodeConfig
     func configProviders(directory: String?) async throws -> OpenCodeConfigProviders
+    func agents() async throws -> [OpenCodeAgent]
     func projects() async throws -> [OpenCodeProject]
     func sessions(directory: String) async throws -> [OpenCodeSession]
     func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus]
@@ -25,6 +26,7 @@ protocol OpenCodeAPIService {
         directory: String,
         text: String,
         model: PromptRequestBody.ModelSelection?,
+        agent: String?,
         variant: String?
     ) async throws
     func replyToPermission(requestID: String, directory: String, reply: String) async throws

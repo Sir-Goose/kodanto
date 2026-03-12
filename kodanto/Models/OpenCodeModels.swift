@@ -139,6 +139,19 @@ struct OpenCodeConfigProviders: Decodable {
     }
 }
 
+struct OpenCodeAgent: Decodable, Identifiable, Hashable {
+    let name: String
+    let description: String?
+    let mode: String
+    let hidden: Bool?
+
+    var id: String { name }
+
+    var isPrimaryVisible: Bool {
+        hidden != true && mode != "subagent"
+    }
+}
+
 struct OpenCodeModelOption: Identifiable, Hashable {
     let providerID: String
     let providerName: String
@@ -1170,6 +1183,7 @@ struct PromptRequestBody: Encodable {
     }
 
     let model: ModelSelection?
+    let agent: String?
     let variant: String?
     let parts: [Part]
 }
