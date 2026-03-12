@@ -190,7 +190,7 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             layoutManager.ensureLayout(for: textContainer)
 
             let usedRect = layoutManager.usedRect(for: textContainer)
-            let minimumLineHeight = ceil(layoutManager.defaultLineHeight(for: textView.font ?? .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)) + (textView.textContainerInset.height * 2))
+            let minimumLineHeight = ceil(layoutManager.defaultLineHeight(for: textView.font ?? .systemFont(ofSize: NSFont.systemFontSize, weight: .regular)) + (textView.textContainerInset.height * 2))
             let contentHeight = max(minimumLineHeight, ceil(usedRect.height + (textView.textContainerInset.height * 2)))
             let targetVisibleHeight = min(contentHeight, max(parent.maxHeight, minimumLineHeight))
             let documentHeight = max(contentHeight, targetVisibleHeight)

@@ -13,7 +13,7 @@ struct MainSessionDetailPane: View {
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
-    private static let composerNSFont = NSFont.monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+    private static let composerNSFont = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     private static let messageColumnMaxWidth: CGFloat = 760
     private static let composerMaxWidth: CGFloat = 770
     private static let composerOuterPadding: CGFloat = 16
@@ -213,7 +213,7 @@ struct MainSessionDetailPane: View {
 
                 if model.draftPrompt.isEmpty {
                     Text("Write a prompt...")
-                        .font(.system(.body, design: .monospaced))
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, Self.composerHorizontalPadding)
                         .padding(.vertical, Self.composerVerticalPadding)

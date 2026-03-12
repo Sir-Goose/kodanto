@@ -7,7 +7,7 @@ struct SessionQuestionDockView: View {
 
     @State private var draftModel: SessionQuestionDraftModel
 
-    private static let customEditorFont = NSFont.systemFont(ofSize: 14)
+    private static let customEditorFont = NSFont.systemFont(ofSize: NSFont.systemFontSize, weight: .regular)
     private static let customEditorInset = NSSize(width: 0, height: 2)
 
     init(model: KodantoAppModel, request: OpenCodeQuestionRequest) {
