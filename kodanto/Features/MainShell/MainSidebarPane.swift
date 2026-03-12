@@ -194,7 +194,7 @@ struct MainSidebarPane: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .padding(.leading, 24)
+                            .padding(.leading, 0)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contextMenu {
                                 Button("Rename…") {
@@ -583,16 +583,12 @@ struct ProjectSidebarRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: leadingIconSystemName)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 12, height: 12)
-                .padding(.top, 3)
-
-            Image(systemName: "folder")
-                .foregroundStyle(.secondary)
-                .padding(.top, 1)
+                .padding(.top, 2)
 
             Text(project.displayName)
                 .font(.body)
@@ -632,6 +628,11 @@ struct ProjectSidebarRow: View {
 
     private var backgroundColor: Color {
         isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+
+    private var leadingIconSystemName: String {
+        guard isHovered else { return "folder" }
+        return isExpanded ? "chevron.down" : "chevron.right"
     }
 
     private var overlayAlignment: Alignment {
