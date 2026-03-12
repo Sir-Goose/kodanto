@@ -667,7 +667,7 @@ struct ProjectSidebarRow: View {
             Button(action: onCreateSession) {
                 Image(systemName: "plus.circle.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.tint)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .help("New Session")

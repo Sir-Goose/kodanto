@@ -20,6 +20,10 @@ struct ComposerControlsRow: View {
                     isShowingPicker.toggle()
                 } label: {
                     HStack(spacing: 10) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+
                         Text(selectedModel.modelName)
                             .font(.callout.weight(.medium))
                             .foregroundStyle(.primary)
@@ -108,6 +112,10 @@ struct AgentPicker: View {
             isShowingPicker.toggle()
         } label: {
             HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
                 Text(selectionLabel)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.primary)
@@ -211,7 +219,15 @@ struct PermissionAutoAcceptToggle: View {
     }
 
     var body: some View {
-        Toggle("Full Access", isOn: isOn)
+        Toggle(isOn: isOn) {
+            HStack(spacing: 6) {
+                Image(systemName: "shield")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
+                Text("Full Access")
+            }
+        }
             .toggleStyle(.switch)
             .controlSize(.mini)
             .font(.caption.weight(.medium))
@@ -241,6 +257,10 @@ struct ThinkingEffortPicker: View {
             isShowingPicker.toggle()
         } label: {
             HStack(spacing: 8) {
+                Image(systemName: "brain")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+
                 Text(selectionLabel)
                     .font(.callout.weight(.medium))
                     .foregroundStyle(.primary)

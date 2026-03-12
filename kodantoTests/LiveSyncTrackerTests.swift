@@ -72,112 +72,133 @@ final class LiveSyncTrackerTests: XCTestCase {
     }
 }
 
-@MainActor
 final class ComposerAgentSelectionTests: XCTestCase {
-    private static var retainedStores: [ComposerStore] = []
+    private var defaultsSuites: [String] = []
+
+    override func tearDown() {
+        for suiteName in defaultsSuites {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        }
+        defaultsSuites.removeAll()
+        super.tearDown()
+    }
 
     func testRefreshModelCatalogFiltersPrimaryVisibleAgents() async throws {
-        let store = makeStore()
-        let service = ComposerAgentMockAPIService()
-        service.agentsResponse = [
-            makeAgent(name: "build", mode: "primary"),
-            makeAgent(name: "plan", mode: "primary"),
-            makeAgent(name: "general", mode: "subagent"),
-            makeAgent(name: "hidden", mode: "primary", hidden: true),
-            makeAgent(name: "custom", mode: "all")
-        ]
+        try await runOnMainActor {
+            let store = self.makeStore()
+            let service = ComposerAgentMockAPIService()
+            service.agentsResponse = [
+                self.makeAgent(name: "build", mode: "primary"),
+                self.makeAgent(name: "plan", mode: "primary"),
+                self.makeAgent(name: "general", mode: "subagent"),
+                self.makeAgent(name: "hidden", mode: "primary", hidden: true),
+                self.makeAgent(name: "custom", mode: "all")
+            ]
 
-        try await store.refreshModelCatalog(using: service)
+            try await store.refreshModelCatalog(using: service)
 
-        XCTAssertEqual(store.availablePrimaryAgents.map(\.name), ["build", "plan", "custom"])
-        XCTAssertEqual(store.selectedPromptAgent, "build")
+            XCTAssertEqual(store.availablePrimaryAgents.map(\.name), ["build", "plan", "custom"])
+            XCTAssertEqual(store.selectedPromptAgent, "build")
+        }
     }
 
-    func testSyncSelectedAgentUsesLatestUserMessageAgentWhenAvailable() {
-        let store = makeStore()
-        store.availablePrimaryAgents = [
-            makeAgent(name: "build", mode: "primary"),
-            makeAgent(name: "plan", mode: "primary")
-        ]
-        store.selectedAgentName = "build"
+    func testSyncSelectedAgentUsesLatestUserMessageAgentWhenAvailable() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            store.availablePrimaryAgents = [
+                self.makeAgent(name: "build", mode: "primary"),
+                self.makeAgent(name: "plan", mode: "primary")
+            ]
+            store.selectedAgentName = "build"
 
-        let messages: [OpenCodeMessageEnvelope] = [
-            makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "build"),
-            makeUserEnvelope(messageID: "m2", sessionID: "session-1", createdAt: 2, agent: "plan")
-        ]
+            let messages: [OpenCodeMessageEnvelope] = [
+                self.makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "build"),
+                self.makeUserEnvelope(messageID: "m2", sessionID: "session-1", createdAt: 2, agent: "plan")
+            ]
 
-        store.syncSelectedAgent(from: messages)
+            store.syncSelectedAgent(from: messages)
 
-        XCTAssertEqual(store.selectedPromptAgent, "plan")
+            XCTAssertEqual(store.selectedPromptAgent, "plan")
+        }
     }
 
-    func testSyncSelectedAgentFallsBackWhenHistoricalAgentUnavailable() {
-        let store = makeStore()
-        store.availablePrimaryAgents = [
-            makeAgent(name: "build", mode: "primary"),
-            makeAgent(name: "plan", mode: "primary")
-        ]
-        store.selectedAgentName = "build"
+    func testSyncSelectedAgentFallsBackWhenHistoricalAgentUnavailable() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            store.availablePrimaryAgents = [
+                self.makeAgent(name: "build", mode: "primary"),
+                self.makeAgent(name: "plan", mode: "primary")
+            ]
+            store.selectedAgentName = "build"
 
-        let messages: [OpenCodeMessageEnvelope] = [
-            makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "my-custom-agent")
-        ]
+            let messages: [OpenCodeMessageEnvelope] = [
+                self.makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "my-custom-agent")
+            ]
 
-        store.syncSelectedAgent(from: messages)
+            store.syncSelectedAgent(from: messages)
 
-        XCTAssertEqual(store.selectedPromptAgent, "build")
+            XCTAssertEqual(store.selectedPromptAgent, "build")
+        }
     }
 
     func testSubmitPromptPassesSelectedAgent() async throws {
-        let store = makeStore()
-        let service = ComposerAgentMockAPIService()
-        store.availablePrimaryAgents = [
-            makeAgent(name: "build", mode: "primary"),
-            makeAgent(name: "plan", mode: "primary")
-        ]
-        store.selectAgent("plan")
-        store.draftPrompt = "Use plan mode"
+        try await runOnMainActor {
+            let store = self.makeStore()
+            let service = ComposerAgentMockAPIService()
+            store.availablePrimaryAgents = [
+                self.makeAgent(name: "build", mode: "primary"),
+                self.makeAgent(name: "plan", mode: "primary")
+            ]
+            store.selectAgent("plan")
+            store.draftPrompt = "Use plan mode"
 
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 100)
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 100)
 
-        try await store.submitPrompt(using: service, project: project, session: session) {}
+            try await store.submitPrompt(using: service, project: project, session: session) {}
 
-        XCTAssertEqual(service.promptCalls.count, 1)
-        XCTAssertEqual(service.promptCalls.first?.agent, "plan")
+            XCTAssertEqual(service.promptCalls.count, 1)
+            XCTAssertEqual(service.promptCalls.first?.agent, "plan")
+        }
     }
 
     func testSubmitPromptWithoutAvailableAgentsSendsNilAgent() async throws {
-        let store = makeStore()
-        let service = ComposerAgentMockAPIService()
-        store.availablePrimaryAgents = []
-        store.selectedAgentName = nil
-        store.draftPrompt = "Use default agent"
+        try await runOnMainActor {
+            let store = self.makeStore()
+            let service = ComposerAgentMockAPIService()
+            store.availablePrimaryAgents = []
+            store.selectedAgentName = nil
+            store.draftPrompt = "Use default agent"
 
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 100)
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 100)
 
-        try await store.submitPrompt(using: service, project: project, session: session) {}
+            try await store.submitPrompt(using: service, project: project, session: session) {}
 
-        XCTAssertEqual(service.promptCalls.count, 1)
-        XCTAssertNil(service.promptCalls.first?.agent)
+            XCTAssertEqual(service.promptCalls.count, 1)
+            XCTAssertNil(service.promptCalls.first?.agent)
+        }
     }
 
+    @MainActor
     private func makeStore() -> ComposerStore {
-        let defaults = UserDefaults(suiteName: "kodanto-tests-\(UUID().uuidString)")!
+        let suiteName = "kodanto-tests-\(UUID().uuidString)"
+        defaultsSuites.append(suiteName)
+        let defaults = UserDefaults(suiteName: suiteName)!
         let store = ComposerStore(
             modelSelectionStore: ModelSelectionStore(userDefaults: defaults),
             modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: defaults)
         )
         store.updateSelectedProfile(UUID())
-        Self.retainedStores.append(store)
         return store
     }
 
+    @MainActor
     private func makeAgent(name: String, mode: String, hidden: Bool = false) -> OpenCodeAgent {
         OpenCodeAgent(name: name, description: "\(name) agent", mode: mode, hidden: hidden)
     }
 
+    @MainActor
     private func makeUserEnvelope(
         messageID: String,
         sessionID: String,
@@ -211,33 +232,43 @@ final class ComposerAgentSelectionTests: XCTestCase {
     }
 }
 
-@MainActor
 final class SessionUnreadModelTests: XCTestCase {
-    private static var retainedModels: [KodantoAppModel] = []
+    private var defaultsSuites: [String] = []
 
-    func testMarkSessionUnreadUpdatesIndicatorWithoutCallingUpdateSession() {
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let session = TestFixtures.session(
-            id: "session-1",
-            projectID: project.id,
-            directory: project.worktree,
-            title: "Session",
-            updatedAt: 200
-        )
-
-        let service = SessionUnreadMockAPIService()
-        let model = makeModel(apiService: service)
-        model.workspaceStore.applyLoadedProjects([project], profileID: model.selectedProfileID)
-        model.workspaceStore.selectProject(project.id)
-        model.workspaceStore.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
-
-        XCTAssertEqual(model.sessionSidebarIndicator(for: session, in: project), .none)
-        model.markSessionUnread(sessionID: session.id, in: project.id)
-
-        XCTAssertEqual(model.sessionSidebarIndicator(for: session, in: project), .completedUnread)
-        XCTAssertEqual(service.updateCallCount, 0)
+    override func tearDown() {
+        for suiteName in defaultsSuites {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
+        }
+        defaultsSuites.removeAll()
+        super.tearDown()
     }
 
+    func testMarkSessionUnreadUpdatesIndicatorWithoutCallingUpdateSession() async {
+        await runOnMainActor {
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let session = TestFixtures.session(
+                id: "session-1",
+                projectID: project.id,
+                directory: project.worktree,
+                title: "Session",
+                updatedAt: 200
+            )
+
+            let service = SessionUnreadMockAPIService()
+            let model = self.makeModel(apiService: service)
+            model.workspaceStore.applyLoadedProjects([project], profileID: model.selectedProfileID)
+            model.workspaceStore.selectProject(project.id)
+            model.workspaceStore.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+
+            XCTAssertEqual(model.sessionSidebarIndicator(for: session, in: project), .none)
+            model.markSessionUnread(sessionID: session.id, in: project.id)
+
+            XCTAssertEqual(model.sessionSidebarIndicator(for: session, in: project), .completedUnread)
+            XCTAssertEqual(service.updateCallCount, 0)
+        }
+    }
+
+    @MainActor
     private func makeModel(apiService: SessionUnreadMockAPIService) -> KodantoAppModel {
         let profile = ServerProfile(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000321") ?? UUID(),
@@ -247,7 +278,9 @@ final class SessionUnreadModelTests: XCTestCase {
             username: "opencode",
             password: "pw"
         )
-        let defaults = UserDefaults(suiteName: "kodanto-tests-\(UUID().uuidString)")!
+        let suiteName = "kodanto-tests-\(UUID().uuidString)"
+        defaultsSuites.append(suiteName)
+        let defaults = UserDefaults(suiteName: suiteName)!
 
         let dependencies = KodantoAppDependencies(
             sidecar: SessionUnreadTestSidecarController(),
@@ -261,79 +294,90 @@ final class SessionUnreadModelTests: XCTestCase {
             clock: SessionUnreadTestClock()
         )
 
-        let model = KodantoAppModel(dependencies: dependencies)
-        Self.retainedModels.append(model)
-        return model
+        return KodantoAppModel(dependencies: dependencies)
     }
 }
 
-@MainActor
 final class SessionUnreadWorkspaceStoreTests: XCTestCase {
-    private static var retainedStores: [WorkspaceStore] = []
+    func testMarkUnreadIdleSessionSetsCompletedUnreadIndicator() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
 
-    func testMarkUnreadIdleSessionSetsCompletedUnreadIndicator() {
-        let store = makeStore()
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
+            store.applyLoadedProjects([project], profileID: nil)
+            store.selectProject(project.id)
+            store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
 
-        store.applyLoadedProjects([project], profileID: nil)
-        store.selectProject(project.id)
-        store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
-
-        store.markSessionUnread(session.id, in: project.id)
-        XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .completedUnread)
+            store.markSessionUnread(session.id, in: project.id)
+            XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .completedUnread)
+        }
     }
 
-    func testSelectingMarkedUnreadSessionClearsIndicator() {
-        let store = makeStore()
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
+    func testSelectingMarkedUnreadSessionClearsIndicator() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
 
-        store.applyLoadedProjects([project], profileID: nil)
-        store.selectProject(project.id)
-        store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
-        store.markSessionUnread(session.id, in: project.id)
+            store.applyLoadedProjects([project], profileID: nil)
+            store.selectProject(project.id)
+            store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+            store.markSessionUnread(session.id, in: project.id)
 
-        _ = store.selectSession(session.id, in: project.id)
-        XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .none)
+            _ = store.selectSession(session.id, in: project.id)
+            XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .none)
+        }
     }
 
-    func testMarkUnreadDoesNotOverrideRunningIndicator() {
-        let store = makeStore()
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let selectedSession = TestFixtures.session(id: "selected", directory: project.worktree, updatedAt: 300)
-        let runningSession = TestFixtures.session(id: "running", directory: project.worktree, updatedAt: 200)
+    func testMarkUnreadDoesNotOverrideRunningIndicator() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let selectedSession = TestFixtures.session(id: "selected", directory: project.worktree, updatedAt: 300)
+            let runningSession = TestFixtures.session(id: "running", directory: project.worktree, updatedAt: 200)
 
-        store.applyLoadedProjects([project], profileID: nil)
-        store.selectProject(project.id)
-        store.applyLoadedSessions(
-            [selectedSession, runningSession],
-            statuses: [selectedSession.id: .idle, runningSession.id: .busy],
-            for: project
-        )
+            store.applyLoadedProjects([project], profileID: nil)
+            store.selectProject(project.id)
+            store.applyLoadedSessions(
+                [selectedSession, runningSession],
+                statuses: [selectedSession.id: .idle, runningSession.id: .busy],
+                for: project
+            )
+            _ = store.selectSession(selectedSession.id, in: project.id)
+            XCTAssertNotEqual(store.selectedSessionID, runningSession.id)
 
-        XCTAssertEqual(store.sessionSidebarIndicator(for: runningSession, in: project), .running)
-        store.markSessionUnread(runningSession.id, in: project.id)
-        XCTAssertEqual(store.sessionSidebarIndicator(for: runningSession, in: project), .running)
+            XCTAssertEqual(store.sessionSidebarIndicator(for: runningSession, in: project), .running)
+            store.markSessionUnread(runningSession.id, in: project.id)
+            XCTAssertEqual(store.sessionSidebarIndicator(for: runningSession, in: project), .running)
+        }
     }
 
-    func testMarkUnreadMissingSessionIsNoOp() {
-        let store = makeStore()
-        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
-        let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
+    func testMarkUnreadMissingSessionIsNoOp() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+            let session = TestFixtures.session(id: "session-1", directory: project.worktree, updatedAt: 200)
 
-        store.applyLoadedProjects([project], profileID: nil)
-        store.selectProject(project.id)
-        store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
+            store.applyLoadedProjects([project], profileID: nil)
+            store.selectProject(project.id)
+            store.applyLoadedSessions([session], statuses: [session.id: .idle], for: project)
 
-        store.markSessionUnread("missing-session", in: project.id)
-        XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .none)
+            store.markSessionUnread("missing-session", in: project.id)
+            XCTAssertEqual(store.sessionSidebarIndicator(for: session, in: project), .none)
+        }
     }
 
+    @MainActor
     private func makeStore() -> WorkspaceStore {
-        let store = WorkspaceStore(projectOrderStore: SessionUnreadProjectOrderStore())
-        Self.retainedStores.append(store)
-        return store
+        WorkspaceStore(projectOrderStore: SessionUnreadProjectOrderStore())
+    }
+}
+
+private extension XCTestCase {
+    @MainActor
+    func runOnMainActor(_ operation: @escaping @MainActor () async throws -> Void) async rethrows {
+        try await operation()
     }
 }
 
