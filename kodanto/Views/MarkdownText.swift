@@ -30,11 +30,24 @@ enum MessageMarkdownRenderer {
         case heading(level: Int, text: AttributedString)
         case list(items: [ListItem])
         case codeBlock(language: String?, code: String)
+        case table(TableData)
     }
 
     struct ListItem: Equatable {
         let marker: String
         let content: AttributedString
+    }
+
+    enum TableColumnAlignment: Equatable {
+        case leading
+        case center
+        case trailing
+    }
+
+    struct TableData: Equatable {
+        let headers: [AttributedString]
+        let rows: [[AttributedString]]
+        let alignments: [TableColumnAlignment]
     }
 
     static func render(_ text: String) -> AttributedString {
@@ -98,7 +111,10 @@ enum MessageMarkdownRenderer {
             pendingListItems.removeAll(keepingCapacity: true)
         }
 
-        for line in lines {
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+
             if var codeBlock = pendingCodeBlock {
                 if isFenceDelimiter(line) {
                     blocks.append(.codeBlock(language: codeBlock.language, code: codeBlock.lines.joined(separator: "\n")))
@@ -107,6 +123,7 @@ enum MessageMarkdownRenderer {
                     codeBlock.lines.append(line)
                     pendingCodeBlock = codeBlock
                 }
+                index += 1
                 continue
             }
 
@@ -114,12 +131,22 @@ enum MessageMarkdownRenderer {
                 flushParagraph()
                 flushList()
                 pendingCodeBlock = codeBlock
+                index += 1
                 continue
             }
 
             if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 flushParagraph()
                 flushList()
+                index += 1
+                continue
+            }
+
+            if let table = parseTable(at: index, lines: lines) {
+                flushParagraph()
+                flushList()
+                blocks.append(.table(table.data))
+                index += table.linesConsumed
                 continue
             }
 
@@ -127,6 +154,7 @@ enum MessageMarkdownRenderer {
                 flushParagraph()
                 flushList()
                 blocks.append(.heading(level: heading.level, text: render(heading.text)))
+                index += 1
                 continue
             }
 
@@ -137,6 +165,7 @@ enum MessageMarkdownRenderer {
                 }
                 currentListKind = listItem.kind
                 pendingListItems.append(PendingListItem(marker: listItem.marker, lines: [listItem.content]))
+                index += 1
                 continue
             }
 
@@ -144,11 +173,13 @@ enum MessageMarkdownRenderer {
                 var item = pendingListItems.removeLast()
                 item.lines.append(line.trimmingCharacters(in: .whitespaces))
                 pendingListItems.append(item)
+                index += 1
                 continue
             }
 
             flushList()
             paragraphLines.append(line)
+            index += 1
         }
 
         if let codeBlock = pendingCodeBlock {
@@ -189,6 +220,11 @@ enum MessageMarkdownRenderer {
         let kind: PendingListKind
         let marker: String
         let content: String
+    }
+
+    private struct ParsedTable {
+        let data: TableData
+        let linesConsumed: Int
     }
 
     private static func openingCodeBlock(from line: String) -> PendingCodeBlock? {
@@ -248,6 +284,102 @@ enum MessageMarkdownRenderer {
         let prefix = line.prefix { $0 == " " || $0 == "\t" }
         return prefix.contains("\t") || prefix.count >= 2
     }
+
+    private static func parseTable(at startIndex: Int, lines: [String]) -> ParsedTable? {
+        guard startIndex + 2 < lines.count else { return nil }
+        guard let headerCells = parseTableCells(from: lines[startIndex]), !headerCells.isEmpty else { return nil }
+        guard let alignments = parseDividerRow(lines[startIndex + 1], expectedColumnCount: headerCells.count) else { return nil }
+
+        var rowCells: [[String]] = []
+        var index = startIndex + 2
+
+        while index < lines.count {
+            let line = lines[index]
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                break
+            }
+
+            guard let cells = parseTableCells(from: line) else {
+                break
+            }
+
+            rowCells.append(normalizedTableCells(cells, columnCount: headerCells.count))
+            index += 1
+        }
+
+        guard !rowCells.isEmpty else { return nil }
+
+        let table = TableData(
+            headers: headerCells.map { render($0) },
+            rows: rowCells.map { $0.map { render($0) } },
+            alignments: alignments
+        )
+        return ParsedTable(data: table, linesConsumed: index - startIndex)
+    }
+
+    private static func parseDividerRow(_ line: String, expectedColumnCount: Int) -> [TableColumnAlignment]? {
+        guard let cells = parseTableCells(from: line), cells.count == expectedColumnCount else { return nil }
+
+        var alignments: [TableColumnAlignment] = []
+        alignments.reserveCapacity(cells.count)
+
+        for cell in cells {
+            let trimmed = cell.trimmingCharacters(in: .whitespaces)
+            guard trimmed.count >= 3 else { return nil }
+
+            let leadingColon = trimmed.hasPrefix(":")
+            let trailingColon = trimmed.hasSuffix(":")
+            let core = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+
+            guard core.count >= 3, core.allSatisfy({ $0 == "-" }) else { return nil }
+
+            switch (leadingColon, trailingColon) {
+            case (true, true):
+                alignments.append(.center)
+            case (false, true):
+                alignments.append(.trailing)
+            default:
+                alignments.append(.leading)
+            }
+        }
+
+        return alignments
+    }
+
+    private static func parseTableCells(from line: String) -> [String]? {
+        let escapedPipePlaceholder = "\u{001F}"
+        let escaped = line.replacingOccurrences(of: "\\|", with: escapedPipePlaceholder)
+        guard escaped.contains("|") else { return nil }
+
+        var content = escaped.trimmingCharacters(in: .whitespaces)
+        if content.hasPrefix("|") {
+            content.removeFirst()
+        }
+        if content.hasSuffix("|") {
+            content.removeLast()
+        }
+
+        let cells = content
+            .split(separator: "|", omittingEmptySubsequences: false)
+            .map { part in
+                part
+                    .replacingOccurrences(of: escapedPipePlaceholder, with: "|")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+
+        return cells.isEmpty ? nil : cells
+    }
+
+    private static func normalizedTableCells(_ cells: [String], columnCount: Int) -> [String] {
+        if cells.count == columnCount {
+            return cells
+        }
+        if cells.count > columnCount {
+            return Array(cells.prefix(columnCount))
+        }
+        return cells + Array(repeating: "", count: columnCount - cells.count)
+    }
 }
 
 private struct MarkdownBlockView: View {
@@ -293,6 +425,47 @@ private struct MarkdownBlockView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        case .table(let table):
+            ScrollView(.horizontal, showsIndicators: true) {
+                Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                    GridRow {
+                        ForEach(Array(table.alignments.enumerated()), id: \.offset) { index, alignment in
+                            let cell = table.headers[index]
+                            tableCell(
+                                cell,
+                                alignment: alignment,
+                                emphasized: true,
+                                showTrailingDivider: index < table.alignments.count - 1
+                            )
+                        }
+                    }
+                    .background(Color.secondary.opacity(0.06))
+
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.18))
+                        .frame(height: 1)
+                        .gridCellColumns(table.alignments.count)
+
+                    ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
+                        GridRow {
+                            ForEach(Array(table.alignments.enumerated()), id: \.offset) { columnIndex, alignment in
+                                let cell = columnIndex < row.count ? row[columnIndex] : AttributedString("")
+                                tableCell(
+                                    cell,
+                                    alignment: alignment,
+                                    emphasized: false,
+                                    showTrailingDivider: columnIndex < table.alignments.count - 1
+                                )
+                            }
+                        }
+                        .background(Color.secondary.opacity(rowIndex.isMultiple(of: 2) ? 0.03 : 0.0))
+                    }
+                }
+                .padding(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
@@ -306,6 +479,50 @@ private struct MarkdownBlockView: View {
             return .headline
         default:
             return .body.weight(.semibold)
+        }
+    }
+
+    @ViewBuilder
+    private func tableCell(
+        _ cell: AttributedString,
+        alignment: MessageMarkdownRenderer.TableColumnAlignment,
+        emphasized: Bool,
+        showTrailingDivider: Bool
+    ) -> some View {
+        Text(cell)
+            .font(emphasized ? .body.weight(.semibold) : .body)
+            .multilineTextAlignment(textAlignment(for: alignment))
+            .frame(minWidth: 140, maxWidth: .infinity, alignment: frameAlignment(for: alignment))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .overlay(alignment: .trailing) {
+                if showTrailingDivider {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(width: 1)
+                }
+            }
+    }
+
+    private func frameAlignment(for alignment: MessageMarkdownRenderer.TableColumnAlignment) -> Alignment {
+        switch alignment {
+        case .leading:
+            return .leading
+        case .center:
+            return .center
+        case .trailing:
+            return .trailing
+        }
+    }
+
+    private func textAlignment(for alignment: MessageMarkdownRenderer.TableColumnAlignment) -> TextAlignment {
+        switch alignment {
+        case .leading:
+            return .leading
+        case .center:
+            return .center
+        case .trailing:
+            return .trailing
         }
     }
 }
