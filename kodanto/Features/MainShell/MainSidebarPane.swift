@@ -10,8 +10,10 @@ struct MainSidebarPane: View {
     @State private var draggedProjectID: OpenCodeProject.ID?
     @State private var projectDropTarget: ProjectDropTarget?
     @State private var hoveredProjectID: OpenCodeProject.ID?
+    @State private var hoveredSessionContext: SessionActionContext?
     @State private var sidebarFocusedItem: SidebarFocusItem?
     @State private var renamingSessionContext: SessionActionContext?
+    @State private var archiveConfirmationContext: SessionActionContext?
     @State private var renameDraftTitle = ""
     @FocusState private var isSidebarFocused: Bool
 
@@ -66,6 +68,14 @@ struct MainSidebarPane: View {
                 updatedItems: newItems
             )
             projectHeaderFrames = projectHeaderFrames.filter { newItems.contains(.project($0.key)) }
+            if let hoveredSessionContext,
+               !newItems.contains(.session(projectID: hoveredSessionContext.projectID, sessionID: hoveredSessionContext.sessionID)) {
+                self.hoveredSessionContext = nil
+            }
+            if let archiveConfirmationContext,
+               !newItems.contains(.session(projectID: archiveConfirmationContext.projectID, sessionID: archiveConfirmationContext.sessionID)) {
+                self.archiveConfirmationContext = nil
+            }
         }
         .task(id: model.selectedProjectID) {
             guard let selectedProjectID = model.selectedProjectID else { return }
@@ -91,6 +101,27 @@ struct MainSidebarPane: View {
                     renamingSessionContext = nil
                 }
             )
+        }
+        .confirmationDialog(
+            "Archive session?",
+            isPresented: Binding(
+                get: { archiveConfirmationContext != nil },
+                set: { showing in
+                    if !showing {
+                        archiveConfirmationContext = nil
+                    }
+                }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Archive", role: .destructive) {
+                guard let context = archiveConfirmationContext else { return }
+                model.archiveSession(sessionID: context.sessionID, in: context.projectID)
+                archiveConfirmationContext = nil
+            }
+            Button("Cancel", role: .cancel) {
+                archiveConfirmationContext = nil
+            }
         }
         .navigationTitle("kodanto")
     }
@@ -182,20 +213,50 @@ struct MainSidebarPane: View {
                     } else {
                         ForEach(sessions) { session in
                             let focusItem = SidebarFocusItem.session(projectID: project.id, sessionID: session.id)
-                            Button {
-                                setSidebarFocus(focusItem)
-                                model.selectSession(session.id, in: project.id)
-                            } label: {
-                                SessionSidebarRow(
-                                    session: session,
-                                    indicator: model.sessionSidebarIndicator(for: session, in: project),
-                                    isSelected: model.selectedSessionID == session.id,
-                                    isFocused: sidebarFocusedItem == focusItem
-                                )
+                            let sessionContext = SessionActionContext(projectID: project.id, sessionID: session.id)
+                            let isSessionHovered = hoveredSessionContext == sessionContext
+
+                            ZStack(alignment: .trailing) {
+                                Button {
+                                    setSidebarFocus(focusItem)
+                                    model.selectSession(session.id, in: project.id)
+                                } label: {
+                                    SessionSidebarRow(
+                                        session: session,
+                                        indicator: model.sessionSidebarIndicator(for: session, in: project),
+                                        isSelected: model.selectedSessionID == session.id,
+                                        isFocused: sidebarFocusedItem == focusItem,
+                                        showsRecency: !isSessionHovered,
+                                        isHovered: isSessionHovered
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
+                                if isSessionHovered {
+                                    Button {
+                                        archiveConfirmationContext = sessionContext
+                                    } label: {
+                                        Image(systemName: "archivebox")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: SessionSidebarRow.trailingAccessoryWidth, alignment: .trailing)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Archive Session")
+                                    .padding(.trailing, 10)
+                                    .transition(.opacity)
+                                }
                             }
-                            .buttonStyle(.plain)
                             .padding(.leading, 0)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .onHover { hovering in
+                                if hovering {
+                                    hoveredSessionContext = sessionContext
+                                } else if hoveredSessionContext == sessionContext {
+                                    hoveredSessionContext = nil
+                                }
+                            }
+                            .animation(.easeInOut(duration: 0.12), value: isSessionHovered)
                             .contextMenu {
                                 Button("Rename…") {
                                     beginRename(session: session, in: project)
@@ -351,7 +412,7 @@ struct MainSidebarPane: View {
     }
 }
 
-private struct SessionActionContext: Identifiable {
+private struct SessionActionContext: Identifiable, Equatable {
     let projectID: OpenCodeProject.ID
     let sessionID: OpenCodeSession.ID
 
@@ -648,11 +709,14 @@ struct ProjectSidebarRow: View {
 }
 
 struct SessionSidebarRow: View {
+    static let trailingAccessoryWidth: CGFloat = 60
+
     let session: OpenCodeSession
     let indicator: SessionSidebarIndicatorState
     let isSelected: Bool
     let isFocused: Bool
-    @State private var isHovered = false
+    let showsRecency: Bool
+    let isHovered: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -666,13 +730,20 @@ struct SessionSidebarRow: View {
 
             Spacer(minLength: 0)
 
-            TimelineView(.periodic(from: .now, by: 60)) { context in
-                Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize()
+            if showsRecency {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(width: Self.trailingAccessoryWidth, alignment: .trailing)
+                }
+            } else {
+                Color.clear
+                    .frame(width: Self.trailingAccessoryWidth, height: 1)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, 10)
@@ -680,9 +751,6 @@ struct SessionSidebarRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: 9))
         .animation(.easeInOut(duration: 0.12), value: isHovered)
-        .onHover { hovering in
-            isHovered = hovering
-        }
     }
 
     private var rowBackground: Color {
