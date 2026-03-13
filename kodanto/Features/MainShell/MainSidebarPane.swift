@@ -6,18 +6,92 @@ struct MainSidebarPane: View {
     @Bindable var model: KodantoAppModel
 
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
+    @State private var projectsShowingAllSessions: Set<OpenCodeProject.ID> = []
     @State private var projectHeaderFrames: [OpenCodeProject.ID: CGRect] = [:]
     @State private var draggedProjectID: OpenCodeProject.ID?
     @State private var projectDropTarget: ProjectDropTarget?
-    @State private var hoveredProjectID: OpenCodeProject.ID?
-    @State private var hoveredSessionContext: SessionActionContext?
     @State private var sidebarFocusedItem: SidebarFocusItem?
     @State private var renamingSessionContext: SessionActionContext?
     @State private var archiveConfirmationContext: SessionActionContext?
     @State private var renameDraftTitle = ""
+    @State private var recencyNow = Date.now
     @FocusState private var isSidebarFocused: Bool
 
     private let projectDropCoordinateSpace = "project-drop-coordinate-space"
+    private static let defaultVisibleSessionCount = 10
+
+    private var sidebarRenderItems: [SidebarRenderItem] {
+        var items: [SidebarRenderItem] = []
+
+        for project in model.projects {
+            let isExpanded = expandedProjectIDs.contains(project.id)
+            let sessions = model.sessions(for: project)
+            let isLoadingSessions = model.isLoadingSessions(for: project)
+
+            items.append(
+                .projectHeader(
+                    project: project,
+                    isExpanded: isExpanded,
+                    isLoading: isLoadingSessions
+                )
+            )
+
+            guard isExpanded else { continue }
+
+            if isLoadingSessions, sessions.isEmpty {
+                items.append(.projectLoading(projectID: project.id))
+                continue
+            }
+
+            if model.hasLoadedSessions(for: project), sessions.isEmpty {
+                items.append(.projectEmpty(projectID: project.id))
+                continue
+            }
+
+            let selectedSessionIndex = model.selectedSessionID.flatMap { selectedSessionID in
+                sessions.firstIndex { $0.id == selectedSessionID }
+            }
+            let pagination = SidebarSessionPagination.projection(
+                totalSessionCount: sessions.count,
+                selectedSessionIndex: selectedSessionIndex,
+                isShowingAll: projectsShowingAllSessions.contains(project.id),
+                defaultVisibleCount: Self.defaultVisibleSessionCount
+            )
+
+            for session in sessions.prefix(pagination.visibleCount) {
+                items.append(
+                    .session(
+                        project: project,
+                        session: session,
+                        indicator: model.sessionSidebarIndicator(for: session, in: project),
+                        canMarkUnread: model.canMarkSessionUnread(sessionID: session.id, in: project.id)
+                    )
+                )
+            }
+
+            if pagination.showsShowMore {
+                items.append(
+                    .sessionPaginationControl(
+                        projectID: project.id,
+                        control: .showMore(hiddenCount: pagination.hiddenCount)
+                    )
+                )
+            } else if pagination.showsShowLess {
+                items.append(
+                    .sessionPaginationControl(
+                        projectID: project.id,
+                        control: .showLess
+                    )
+                )
+            }
+        }
+
+        return items
+    }
+
+    private var sidebarFocusableItems: [SidebarFocusItem] {
+        sidebarRenderItems.compactMap(\.focusItem)
+    }
 
     var body: some View {
         ScrollView {
@@ -26,25 +100,23 @@ struct MainSidebarPane: View {
                     .padding(.horizontal, 10)
                     .padding(.bottom, 4)
 
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(model.projects) { project in
-                        projectSection(for: project)
-                    }
+                ForEach(sidebarRenderItems) { item in
+                    sidebarRow(for: item)
+                        .padding(.horizontal, 8)
                 }
-                .padding(.horizontal, 8)
-                .coordinateSpace(name: projectDropCoordinateSpace)
-                .onPreferenceChange(ProjectHeaderFramePreferenceKey.self) { frames in
-                    projectHeaderFrames = frames
-                }
-                .contentShape(Rectangle())
-                .onDrop(of: [UTType.plainText], delegate: ProjectSidebarContainerDropDelegate(
-                    model: model,
-                    projectOrder: model.projects.map(\.id),
-                    projectHeaderFrames: projectHeaderFrames,
-                    draggedProjectID: $draggedProjectID,
-                    dropTarget: $projectDropTarget
-                ))
             }
+            .coordinateSpace(name: projectDropCoordinateSpace)
+            .onPreferenceChange(ProjectHeaderFramePreferenceKey.self) { frames in
+                projectHeaderFrames = frames
+            }
+            .contentShape(Rectangle())
+            .onDrop(of: [UTType.plainText], delegate: ProjectSidebarContainerDropDelegate(
+                model: model,
+                projectOrder: model.projects.map(\.id),
+                projectHeaderFrames: projectHeaderFrames,
+                draggedProjectID: $draggedProjectID,
+                dropTarget: $projectDropTarget
+            ))
             .padding(.vertical, 10)
         }
         .focusable()
@@ -68,10 +140,6 @@ struct MainSidebarPane: View {
                 updatedItems: newItems
             )
             projectHeaderFrames = projectHeaderFrames.filter { newItems.contains(.project($0.key)) }
-            if let hoveredSessionContext,
-               !newItems.contains(.session(projectID: hoveredSessionContext.projectID, sessionID: hoveredSessionContext.sessionID)) {
-                self.hoveredSessionContext = nil
-            }
             if let archiveConfirmationContext,
                !newItems.contains(.session(projectID: archiveConfirmationContext.projectID, sessionID: archiveConfirmationContext.sessionID)) {
                 self.archiveConfirmationContext = nil
@@ -81,9 +149,22 @@ struct MainSidebarPane: View {
             guard let selectedProjectID = model.selectedProjectID else { return }
             expandedProjectIDs.insert(selectedProjectID)
         }
+        .task {
+            await runRecencyTicker()
+        }
+        .onChange(of: model.projects.map(\.id)) { _, projectIDs in
+            let validProjectIDs = Set(projectIDs)
+            expandedProjectIDs = expandedProjectIDs.intersection(validProjectIDs)
+            projectsShowingAllSessions = SidebarSessionPaginationStateResolver.sanitized(
+                projectsShowingAllSessions,
+                validProjectIDs: validProjectIDs
+            )
+            projectHeaderFrames = projectHeaderFrames.filter { validProjectIDs.contains($0.key) }
+        }
         .onAppear {
             draggedProjectID = nil
             projectDropTarget = nil
+            recencyNow = .now
             if sidebarFocusedItem == nil {
                 sidebarFocusedItem = sidebarFocusableItems.first
             }
@@ -142,153 +223,145 @@ struct MainSidebarPane: View {
         }
     }
 
-    private func projectSection(for project: OpenCodeProject) -> some View {
-        let isExpanded = expandedProjectIDs.contains(project.id)
-        let sessions = model.sessions(for: project)
+    @ViewBuilder
+    private func sidebarRow(for item: SidebarRenderItem) -> some View {
+        switch item {
+        case let .projectHeader(project, isExpanded, isLoading):
+            projectHeaderRow(project: project, isExpanded: isExpanded, isLoading: isLoading)
+        case .projectLoading:
+            projectLoadingRow
+        case .projectEmpty:
+            projectEmptyRow
+        case let .sessionPaginationControl(projectID, control):
+            sessionPaginationControlRow(projectID: projectID, control: control)
+        case let .session(project, session, indicator, canMarkUnread):
+            sessionRow(
+                project: project,
+                session: session,
+                indicator: indicator,
+                canMarkUnread: canMarkUnread
+            )
+        }
+    }
+
+    private func projectHeaderRow(
+        project: OpenCodeProject,
+        isExpanded: Bool,
+        isLoading: Bool
+    ) -> some View {
         let projectFocusItem = SidebarFocusItem.project(project.id)
-        let showNewSessionButton = hoveredProjectID == project.id
 
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                ProjectSidebarRow(
-                    project: project,
-                    isExpanded: isExpanded,
-                    dropPlacement: dropPlacement(for: project.id),
-                    showsNewSessionButton: showNewSessionButton,
-                    canCreateSession: model.selectedProfile != nil,
-                    onCreateSession: {
-                        expandedProjectIDs.insert(project.id)
-                        model.createSession(in: project.id)
-                    }
-                )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    setSidebarFocus(projectFocusItem)
-                    toggleProjectExpansion(for: project)
+        return HStack(spacing: 10) {
+            ProjectSidebarRow(
+                project: project,
+                isExpanded: isExpanded,
+                dropPlacement: dropPlacement(for: project.id),
+                canCreateSession: model.selectedProfile != nil,
+                onCreateSession: {
+                    expandedProjectIDs.insert(project.id)
+                    model.createSession(in: project.id)
                 }
-                .onDrag {
-                    draggedProjectID = project.id
-                    return NSItemProvider(object: NSString(string: project.id))
-                }
-
-                if model.isLoadingSessions(for: project) {
-                    ProgressView()
-                        .controlSize(.small)
-                }
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                setSidebarFocus(projectFocusItem)
+                toggleProjectExpansion(for: project)
             }
-            .onHover { hovering in
-                if hovering {
-                    hoveredProjectID = project.id
-                } else if hoveredProjectID == project.id {
-                    hoveredProjectID = nil
-                }
-            }
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .preference(key: ProjectHeaderFramePreferenceKey.self, value: [
-                            project.id: proxy.frame(in: .named(projectDropCoordinateSpace))
-                        ])
-                }
+            .onDrag {
+                draggedProjectID = project.id
+                return NSItemProvider(object: NSString(string: project.id))
             }
 
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 0) {
-                    if model.isLoadingSessions(for: project), sessions.isEmpty {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Loading sessions")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.leading, 28)
-                        .padding(.vertical, 4)
-                    } else if model.hasLoadedSessions(for: project), sessions.isEmpty {
-                        Text("No sessions yet")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.leading, 28)
-                            .padding(.vertical, 4)
-                    } else {
-                        ForEach(sessions) { session in
-                            let focusItem = SidebarFocusItem.session(projectID: project.id, sessionID: session.id)
-                            let sessionContext = SessionActionContext(projectID: project.id, sessionID: session.id)
-                            let isSessionHovered = hoveredSessionContext == sessionContext
-                            let indicator = model.sessionSidebarIndicator(for: session, in: project)
-                            let canMarkUnread = model.canMarkSessionUnread(sessionID: session.id, in: project.id)
-
-                            ZStack(alignment: .trailing) {
-                                Button {
-                                    setSidebarFocus(focusItem)
-                                    model.selectSession(session.id, in: project.id)
-                                } label: {
-                                    SessionSidebarRow(
-                                        session: session,
-                                        indicator: indicator,
-                                        isSelected: model.selectedSessionID == session.id,
-                                        isFocused: sidebarFocusedItem == focusItem,
-                                        showsRecency: !isSessionHovered,
-                                        isHovered: isSessionHovered
-                                    )
-                                }
-                                .buttonStyle(.plain)
-
-                                if isSessionHovered {
-                                    Button {
-                                        archiveConfirmationContext = sessionContext
-                                    } label: {
-                                        SessionSidebarRow.trailingAccessorySlot {
-                                            Image(systemName: "archivebox")
-                                                .font(.caption.weight(.semibold))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Archive Session")
-                                    .padding(.trailing, 10)
-                                    .transition(.opacity)
-                                }
-                            }
-                            .padding(.leading, 0)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .onHover { hovering in
-                                if hovering {
-                                    hoveredSessionContext = sessionContext
-                                } else if hoveredSessionContext == sessionContext {
-                                    hoveredSessionContext = nil
-                                }
-                            }
-                            .animation(.easeInOut(duration: 0.12), value: isSessionHovered)
-                            .contextMenu {
-                                Button("Mark as unread") {
-                                    model.markSessionUnread(sessionID: session.id, in: project.id)
-                                }
-                                .disabled(!canMarkUnread)
-                                Button("Rename…") {
-                                    beginRename(session: session, in: project)
-                                }
-                                Button("Archive", role: .destructive) {
-                                    model.archiveSession(sessionID: session.id, in: project.id)
-                                }
-                            }
-                        }
-                    }
-                }
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .preference(key: ProjectHeaderFramePreferenceKey.self, value: [
+                        project.id: proxy.frame(in: .named(projectDropCoordinateSpace))
+                    ])
             }
         }
     }
 
-    private var sidebarFocusableItems: [SidebarFocusItem] {
-        var items: [SidebarFocusItem] = []
-        for project in model.projects {
-            items.append(.project(project.id))
-            guard expandedProjectIDs.contains(project.id) else { continue }
-            for session in model.sessions(for: project) {
-                items.append(.session(projectID: project.id, sessionID: session.id))
-            }
+    private var projectLoadingRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading sessions")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        return items
+        .padding(.leading, 28)
+        .padding(.vertical, 4)
+    }
+
+    private var projectEmptyRow: some View {
+        Text("No sessions yet")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.leading, 28)
+            .padding(.vertical, 4)
+    }
+
+    private func sessionPaginationControlRow(
+        projectID: OpenCodeProject.ID,
+        control: SidebarSessionPaginationControl
+    ) -> some View {
+        Button {
+            handleSessionPaginationControl(control, for: projectID)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: control.symbolName)
+                    .font(.caption.weight(.semibold))
+                Text(control.title)
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.leading, 28)
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sessionRow(
+        project: OpenCodeProject,
+        session: OpenCodeSession,
+        indicator: SessionSidebarIndicatorState,
+        canMarkUnread: Bool
+    ) -> some View {
+        let focusItem = SidebarFocusItem.session(projectID: project.id, sessionID: session.id)
+        let sessionContext = SessionActionContext(projectID: project.id, sessionID: session.id)
+
+        return SessionSidebarRowContainer(
+            session: session,
+            indicator: indicator,
+            isSelected: model.selectedSessionID == session.id,
+            isFocused: sidebarFocusedItem == focusItem,
+            recencyNow: recencyNow,
+            canMarkUnread: canMarkUnread,
+            onSelect: {
+                setSidebarFocus(focusItem)
+                model.selectSession(session.id, in: project.id)
+            },
+            onArchive: {
+                archiveConfirmationContext = sessionContext
+            },
+            onMarkUnread: {
+                model.markSessionUnread(sessionID: session.id, in: project.id)
+            },
+            onRename: {
+                beginRename(session: session, in: project)
+            },
+            onArchiveFromContextMenu: {
+                model.archiveSession(sessionID: session.id, in: project.id)
+            }
+        )
     }
 
     private func sidebarSectionHeader(_ title: String) -> some View {
@@ -358,6 +431,10 @@ struct MainSidebarPane: View {
         case let .project(projectID):
             guard expandedProjectIDs.contains(projectID) else { return }
             expandedProjectIDs.remove(projectID)
+            projectsShowingAllSessions = SidebarSessionPaginationStateResolver.collapsed(
+                projectsShowingAllSessions,
+                projectID: projectID
+            )
         case let .session(projectID, _):
             self.sidebarFocusedItem = .project(projectID)
         }
@@ -406,6 +483,10 @@ struct MainSidebarPane: View {
             expandedProjectIDs.insert(project.id)
         } else {
             expandedProjectIDs.remove(project.id)
+            projectsShowingAllSessions = SidebarSessionPaginationStateResolver.collapsed(
+                projectsShowingAllSessions,
+                projectID: project.id
+            )
         }
 
         if shouldExpand {
@@ -416,6 +497,156 @@ struct MainSidebarPane: View {
     private func dropPlacement(for projectID: OpenCodeProject.ID) -> ProjectDropPlacement? {
         guard let projectDropTarget, projectDropTarget.projectID == projectID else { return nil }
         return projectDropTarget.placement
+    }
+
+    @MainActor
+    private func runRecencyTicker() async {
+        recencyNow = .now
+
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(60))
+            if Task.isCancelled { break }
+            recencyNow = .now
+        }
+    }
+
+    private func handleSessionPaginationControl(
+        _ control: SidebarSessionPaginationControl,
+        for projectID: OpenCodeProject.ID
+    ) {
+        switch control {
+        case .showMore:
+            projectsShowingAllSessions.insert(projectID)
+        case .showLess:
+            projectsShowingAllSessions.remove(projectID)
+        }
+    }
+}
+
+enum SidebarSessionPagination {
+    struct Projection: Equatable {
+        let visibleCount: Int
+        let hiddenCount: Int
+        let showsShowMore: Bool
+        let showsShowLess: Bool
+    }
+
+    static func projection(
+        totalSessionCount: Int,
+        selectedSessionIndex: Int?,
+        isShowingAll: Bool,
+        defaultVisibleCount: Int
+    ) -> Projection {
+        let totalSessionCount = max(0, totalSessionCount)
+        let defaultVisibleCount = max(1, defaultVisibleCount)
+
+        guard totalSessionCount > 0 else {
+            return Projection(visibleCount: 0, hiddenCount: 0, showsShowMore: false, showsShowLess: false)
+        }
+
+        if isShowingAll {
+            return Projection(
+                visibleCount: totalSessionCount,
+                hiddenCount: 0,
+                showsShowMore: false,
+                showsShowLess: totalSessionCount > defaultVisibleCount
+            )
+        }
+
+        var visibleCount = min(defaultVisibleCount, totalSessionCount)
+
+        if let selectedSessionIndex,
+           selectedSessionIndex >= 0,
+           selectedSessionIndex < totalSessionCount,
+           selectedSessionIndex >= visibleCount {
+            visibleCount = selectedSessionIndex + 1
+        }
+
+        let hiddenCount = max(0, totalSessionCount - visibleCount)
+        return Projection(
+            visibleCount: visibleCount,
+            hiddenCount: hiddenCount,
+            showsShowMore: hiddenCount > 0,
+            showsShowLess: false
+        )
+    }
+}
+
+enum SidebarSessionPaginationStateResolver {
+    static func collapsed(
+        _ projectsShowingAllSessions: Set<OpenCodeProject.ID>,
+        projectID: OpenCodeProject.ID
+    ) -> Set<OpenCodeProject.ID> {
+        projectsShowingAllSessions.subtracting([projectID])
+    }
+
+    static func sanitized(
+        _ projectsShowingAllSessions: Set<OpenCodeProject.ID>,
+        validProjectIDs: Set<OpenCodeProject.ID>
+    ) -> Set<OpenCodeProject.ID> {
+        projectsShowingAllSessions.intersection(validProjectIDs)
+    }
+}
+
+private enum SidebarSessionPaginationControl: Equatable {
+    case showMore(hiddenCount: Int)
+    case showLess
+
+    var title: String {
+        switch self {
+        case let .showMore(hiddenCount):
+            return "Show \(hiddenCount) more"
+        case .showLess:
+            return "Show less"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .showMore:
+            return "chevron.down"
+        case .showLess:
+            return "chevron.up"
+        }
+    }
+}
+
+private enum SidebarRenderItem: Identifiable {
+    case projectHeader(project: OpenCodeProject, isExpanded: Bool, isLoading: Bool)
+    case projectLoading(projectID: OpenCodeProject.ID)
+    case projectEmpty(projectID: OpenCodeProject.ID)
+    case sessionPaginationControl(projectID: OpenCodeProject.ID, control: SidebarSessionPaginationControl)
+    case session(
+        project: OpenCodeProject,
+        session: OpenCodeSession,
+        indicator: SessionSidebarIndicatorState,
+        canMarkUnread: Bool
+    )
+
+    var id: String {
+        switch self {
+        case let .projectHeader(project, _, _):
+            return "project-header-\(project.id)"
+        case let .projectLoading(projectID):
+            return "project-loading-\(projectID)"
+        case let .projectEmpty(projectID):
+            return "project-empty-\(projectID)"
+        case let .sessionPaginationControl(projectID, _):
+            return "session-pagination-control-\(projectID)"
+        case let .session(project, session, _, _):
+            return "session-\(project.id)-\(session.id)"
+        }
+    }
+
+    var focusItem: SidebarFocusItem? {
+        switch self {
+        case let .projectHeader(project, _, _):
+            return .project(project.id)
+        case let .session(project, session, _, _):
+            return .session(projectID: project.id, sessionID: session.id)
+        case .projectLoading, .projectEmpty, .sessionPaginationControl:
+            return nil
+        }
     }
 }
 
@@ -645,7 +876,6 @@ struct ProjectSidebarRow: View {
     let project: OpenCodeProject
     let isExpanded: Bool
     let dropPlacement: ProjectDropPlacement?
-    let showsNewSessionButton: Bool
     let canCreateSession: Bool
     let onCreateSession: () -> Void
     @State private var isHovered = false
@@ -672,8 +902,8 @@ struct ProjectSidebarRow: View {
             .buttonStyle(.plain)
             .help("New Session")
             .disabled(!canCreateSession)
-            .opacity(showsNewSessionButton ? 1 : 0)
-            .allowsHitTesting(showsNewSessionButton)
+            .opacity(isHovered ? 1 : 0)
+            .allowsHitTesting(isHovered)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -715,6 +945,66 @@ struct ProjectSidebarRow: View {
     }
 }
 
+private struct SessionSidebarRowContainer: View {
+    let session: OpenCodeSession
+    let indicator: SessionSidebarIndicatorState
+    let isSelected: Bool
+    let isFocused: Bool
+    let recencyNow: Date
+    let canMarkUnread: Bool
+    let onSelect: () -> Void
+    let onArchive: () -> Void
+    let onMarkUnread: () -> Void
+    let onRename: () -> Void
+    let onArchiveFromContextMenu: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button(action: onSelect) {
+                SessionSidebarRow(
+                    session: session,
+                    indicator: indicator,
+                    isSelected: isSelected,
+                    isFocused: isFocused,
+                    showsRecency: !isHovered,
+                    isHovered: isHovered,
+                    recencyNow: recencyNow
+                )
+            }
+            .buttonStyle(.plain)
+
+            if isHovered {
+                Button(action: onArchive) {
+                    SessionSidebarRow.trailingAccessorySlot {
+                        Image(systemName: "archivebox")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Archive Session")
+                .padding(.trailing, 10)
+                .transition(.opacity)
+            }
+        }
+        .padding(.leading, 0)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .animation(.easeInOut(duration: 0.12), value: isHovered)
+        .contextMenu {
+            Button("Mark as unread", action: onMarkUnread)
+                .disabled(!canMarkUnread)
+
+            Button("Rename…", action: onRename)
+            Button("Archive", role: .destructive, action: onArchiveFromContextMenu)
+        }
+    }
+}
+
 struct SessionSidebarRow: View {
     static let trailingAccessoryTemplateToken = SessionRecencyFormatter.maxLayoutToken
 
@@ -724,6 +1014,7 @@ struct SessionSidebarRow: View {
     let isFocused: Bool
     let showsRecency: Bool
     let isHovered: Bool
+    let recencyNow: Date
 
     static func trailingAccessorySlot<Content: View>(
         @ViewBuilder content: () -> Content
@@ -746,13 +1037,11 @@ struct SessionSidebarRow: View {
 
             Self.trailingAccessorySlot {
                 if showsRecency {
-                    TimelineView(.periodic(from: .now, by: 60)) { context in
-                        Text(SessionRecencyFormatter.string(since: session.time.updated, now: context.date))
-                            .font(.caption)
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    Text(SessionRecencyFormatter.string(since: session.time.updated, now: recencyNow))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 } else {
                     Color.clear
                         .frame(height: 1)
