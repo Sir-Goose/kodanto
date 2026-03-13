@@ -6,11 +6,45 @@ final class OpenCodeAPIClientPTYRequestTests: XCTestCase {
         let client = makeClient()
 
         let request = try client.ptyListRequest(directory: "/tmp/project")
+        let queryItems = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems)
 
         XCTAssertEqual(request.httpMethod, "GET")
         XCTAssertEqual(request.url?.path, "/pty")
-        XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.name, "directory")
-        XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "/tmp/project")
+        XCTAssertEqual(queryItems.count, 1)
+        XCTAssertEqual(queryItems.first?.name, "directory")
+        XCTAssertEqual(queryItems.first?.value, "/tmp/project")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), expectedAuthorization)
+    }
+
+    func testSessionListRequestIncludesDirectoryRootsAndLimitQueries() throws {
+        let client = makeClient()
+
+        let request = try client.sessionListRequest(directory: "/tmp/project")
+        let components = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        let queryItems = components.queryItems ?? []
+
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(components.path, "/session")
+        XCTAssertEqual(queryItems.first(where: { $0.name == "directory" })?.value, "/tmp/project")
+        XCTAssertEqual(queryItems.first(where: { $0.name == "roots" })?.value, "true")
+        XCTAssertEqual(queryItems.first(where: { $0.name == "limit" })?.value, "100")
+        XCTAssertEqual(queryItems.filter { $0.name == "directory" }.count, 1)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), expectedAuthorization)
+    }
+
+    func testSessionStatusRequestIncludesDirectoryQuery() throws {
+        let client = makeClient()
+
+        let request = try client.sessionStatusRequest(directory: "/tmp/project")
+        let components = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        let queryItems = components.queryItems ?? []
+
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(components.path, "/session/status")
+        XCTAssertEqual(queryItems.first(where: { $0.name == "directory" })?.value, "/tmp/project")
+        XCTAssertEqual(queryItems.filter { $0.name == "directory" }.count, 1)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "x-opencode-directory"), "/tmp/project")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), expectedAuthorization)
     }
 

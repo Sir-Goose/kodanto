@@ -33,14 +33,15 @@ struct OpenCodeAPIClient {
     }
 
     func sessions(directory: String) async throws -> [OpenCodeSession] {
-        try await request(path: "/session", directory: directory, queryItems: [
-            URLQueryItem(name: "roots", value: "true"),
-            URLQueryItem(name: "limit", value: "100")
-        ])
+        let request = try sessionListRequest(directory: directory)
+        let data = try await requestData(for: request)
+        return try decoder.decode([OpenCodeSession].self, from: data)
     }
 
     func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus] {
-        let map: OpenCodeSessionStatusMap = try await request(path: "/session/status", directory: directory)
+        let request = try sessionStatusRequest(directory: directory)
+        let data = try await requestData(for: request)
+        let map = try decoder.decode(OpenCodeSessionStatusMap.self, from: data)
         return map.values
     }
 
@@ -205,6 +206,17 @@ struct OpenCodeAPIClient {
 
     func ptyListRequest(directory: String) throws -> URLRequest {
         try makeRequest(path: "/pty", method: "GET", queryItems: [URLQueryItem(name: "directory", value: directory)])
+    }
+
+    func sessionListRequest(directory: String) throws -> URLRequest {
+        try makeRequest(path: "/session", method: "GET", directory: directory, queryItems: [
+            URLQueryItem(name: "roots", value: "true"),
+            URLQueryItem(name: "limit", value: "100")
+        ])
+    }
+
+    func sessionStatusRequest(directory: String) throws -> URLRequest {
+        try makeRequest(path: "/session/status", method: "GET", directory: directory)
     }
 
     func ptyCreateRequest(
@@ -388,7 +400,12 @@ struct OpenCodeAPIClient {
             throw OpenCodeAPIError.invalidBaseURL(profile.baseURL)
         }
 
-        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        var resolvedQueryItems = queryItems
+        if let directory, !directory.isEmpty,
+           !resolvedQueryItems.contains(where: { $0.name == "directory" }) {
+            resolvedQueryItems.append(URLQueryItem(name: "directory", value: directory))
+        }
+        components.queryItems = resolvedQueryItems.isEmpty ? nil : resolvedQueryItems
 
         guard let url = components.url else {
             throw OpenCodeAPIError.invalidBaseURL(profile.baseURL)

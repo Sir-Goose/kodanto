@@ -11,11 +11,13 @@
 		34A3BB742F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB6E2F5DA6C8005149D1 /* OpenCodeSSEClientEventParserTests.swift */; };
 		34A3BB752F5DA6C8005149D1 /* LiveSyncTrackerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB6F2F5DA6C8005149D1 /* LiveSyncTrackerTests.swift */; };
 		34A3BB762F5DA6C8005149D1 /* TranscriptTurnTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB702F5DA6C8005149D1 /* TranscriptTurnTests.swift */; };
-		34A3BB772F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */; };
-			34A3BB782F5DA6C8005149D1 /* ProjectOrderResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */; };
-			55E4C1012F7000010A000001 /* MessageMarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C1022F7000010A000001 /* MessageMarkdownRendererTests.swift */; };
-			55E4C2012F7000010A000001 /* TerminalToggleButtonStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2022F7000010A000001 /* TerminalToggleButtonStyleTests.swift */; };
-			55E4C2032F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2042F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift */; };
+			34A3BB772F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */; };
+				34A3BB782F5DA6C8005149D1 /* ProjectOrderResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */; };
+				55E4C1012F7000010A000001 /* MessageMarkdownRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C1022F7000010A000001 /* MessageMarkdownRendererTests.swift */; };
+				55E4C2012F7000010A000001 /* TerminalToggleButtonStyleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2022F7000010A000001 /* TerminalToggleButtonStyleTests.swift */; };
+				55E4C2032F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2042F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift */; };
+				55E4C2052F7000010A000001 /* OpenCodeAPIClientPTYRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2062F7000010A000001 /* OpenCodeAPIClientPTYRequestTests.swift */; };
+				55E4C2072F7000010A000001 /* KodantoAppModelSessionActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2082F7000010A000001 /* KodantoAppModelSessionActionsTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -36,10 +38,12 @@
 		34A3BB6F2F5DA6C8005149D1 /* LiveSyncTrackerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSyncTrackerTests.swift; sourceTree = "<group>"; };
 		34A3BB702F5DA6C8005149D1 /* TranscriptTurnTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptTurnTests.swift; sourceTree = "<group>"; };
 		34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionTodoDockStateMachineTests.swift; sourceTree = "<group>"; };
-			34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectOrderResolverTests.swift; sourceTree = "<group>"; };
-			55E4C1022F7000010A000001 /* MessageMarkdownRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageMarkdownRendererTests.swift; sourceTree = "<group>"; };
-			55E4C2022F7000010A000001 /* TerminalToggleButtonStyleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalToggleButtonStyleTests.swift; sourceTree = "<group>"; };
-			55E4C2042F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWebViewVisibilityTransitionTests.swift; sourceTree = "<group>"; };
+				34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectOrderResolverTests.swift; sourceTree = "<group>"; };
+				55E4C1022F7000010A000001 /* MessageMarkdownRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageMarkdownRendererTests.swift; sourceTree = "<group>"; };
+				55E4C2022F7000010A000001 /* TerminalToggleButtonStyleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalToggleButtonStyleTests.swift; sourceTree = "<group>"; };
+				55E4C2042F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWebViewVisibilityTransitionTests.swift; sourceTree = "<group>"; };
+				55E4C2062F7000010A000001 /* OpenCodeAPIClientPTYRequestTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenCodeAPIClientPTYRequestTests.swift; sourceTree = "<group>"; };
+				55E4C2082F7000010A000001 /* KodantoAppModelSessionActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KodantoAppModelSessionActionsTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -88,12 +92,14 @@
 				34A3BB702F5DA6C8005149D1 /* TranscriptTurnTests.swift */,
 					34A3BB712F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift */,
 					34A3BB722F5DA6C8005149D1 /* ProjectOrderResolverTests.swift */,
-					55E4C1022F7000010A000001 /* MessageMarkdownRendererTests.swift */,
-					55E4C2022F7000010A000001 /* TerminalToggleButtonStyleTests.swift */,
-					55E4C2042F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift */,
-				);
-				path = kodantoTests;
-				sourceTree = "<group>";
+						55E4C1022F7000010A000001 /* MessageMarkdownRendererTests.swift */,
+						55E4C2022F7000010A000001 /* TerminalToggleButtonStyleTests.swift */,
+						55E4C2042F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift */,
+						55E4C2062F7000010A000001 /* OpenCodeAPIClientPTYRequestTests.swift */,
+						55E4C2082F7000010A000001 /* KodantoAppModelSessionActionsTests.swift */,
+					);
+					path = kodantoTests;
+					sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
@@ -204,13 +210,15 @@
 				34A3BB752F5DA6C8005149D1 /* LiveSyncTrackerTests.swift in Sources */,
 				34A3BB762F5DA6C8005149D1 /* TranscriptTurnTests.swift in Sources */,
 					34A3BB772F5DA6C8005149D1 /* SessionTodoDockStateMachineTests.swift in Sources */,
-					34A3BB782F5DA6C8005149D1 /* ProjectOrderResolverTests.swift in Sources */,
-					55E4C1012F7000010A000001 /* MessageMarkdownRendererTests.swift in Sources */,
-					55E4C2012F7000010A000001 /* TerminalToggleButtonStyleTests.swift in Sources */,
-					55E4C2032F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift in Sources */,
-				);
-				runOnlyForDeploymentPostprocessing = 0;
-			};
+						34A3BB782F5DA6C8005149D1 /* ProjectOrderResolverTests.swift in Sources */,
+						55E4C1012F7000010A000001 /* MessageMarkdownRendererTests.swift in Sources */,
+						55E4C2012F7000010A000001 /* TerminalToggleButtonStyleTests.swift in Sources */,
+						55E4C2032F7000010A000001 /* TerminalWebViewVisibilityTransitionTests.swift in Sources */,
+						55E4C2052F7000010A000001 /* OpenCodeAPIClientPTYRequestTests.swift in Sources */,
+						55E4C2072F7000010A000001 /* KodantoAppModelSessionActionsTests.swift in Sources */,
+					);
+					runOnlyForDeploymentPostprocessing = 0;
+				};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

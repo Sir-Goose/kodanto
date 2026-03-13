@@ -3,6 +3,43 @@ import XCTest
 
 @MainActor
 final class KodantoAppModelSessionActionsTests: XCTestCase {
+    func testAddProjectMovesNewProjectToTopOfSidebar() async throws {
+        let firstProject = TestFixtures.project(
+            id: "project-1",
+            worktree: "/tmp/project-1",
+            updatedAt: 300
+        )
+        let secondProject = TestFixtures.project(
+            id: "project-2",
+            worktree: "/tmp/project-2",
+            updatedAt: 200
+        )
+        let createdProject = TestFixtures.project(
+            id: "project-test1",
+            worktree: "/Users/matthew/Programming/test1",
+            updatedAt: 10
+        )
+
+        let service = MockOpenCodeAPIService(
+            sessions: [],
+            projects: [firstProject, secondProject],
+            initializedProjectsByDirectory: [createdProject.worktree: createdProject]
+        )
+        let model = makeModel(apiService: service)
+        model.workspaceStore.applyLoadedProjects([firstProject, secondProject], profileID: model.selectedProfileID)
+        model.workspaceStore.selectProject(firstProject.id)
+
+        model.addProject(from: createdProject.worktree)
+
+        let reachedTop = await waitUntil {
+            model.projects.first?.id == createdProject.id && model.selectedProjectID == createdProject.id
+        }
+        XCTAssertTrue(reachedTop)
+        XCTAssertEqual(service.initializeGitRepositoryCalls, [createdProject.worktree])
+        XCTAssertEqual(model.projects.first?.id, createdProject.id)
+        XCTAssertEqual(model.selectedProjectID, createdProject.id)
+    }
+
     func testSubmitSessionRenamePatchesTitleAndUpdatesSidebarCache() async throws {
         let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
         let session = TestFixtures.session(
@@ -78,9 +115,12 @@ final class KodantoAppModelSessionActionsTests: XCTestCase {
         model.draftPrompt = "Hello from first prompt"
         model.sendPrompt()
 
-        XCTAssertTrue(await waitUntil { service.createCalls.count == 1 })
-        XCTAssertTrue(await waitUntil { service.promptCalls.count == 1 })
-        XCTAssertTrue(await waitUntil { !model.selectedSessionMessages.isEmpty })
+        let createCalled = await waitUntil { service.createCalls.count == 1 }
+        XCTAssertTrue(createCalled)
+        let promptCalled = await waitUntil { service.promptCalls.count == 1 }
+        XCTAssertTrue(promptCalled)
+        let renderedMessages = await waitUntil { !model.selectedSessionMessages.isEmpty }
+        XCTAssertTrue(renderedMessages)
 
         guard let firstMessage = model.selectedSessionMessages.first else {
             XCTFail("Expected first message to render for new-session first send")
@@ -156,7 +196,7 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         let title: String?
     }
 
-    struct PromptCall: Equatable {
+    struct PromptCall {
         let sessionID: String
         let directory: String
         let text: String
@@ -168,16 +208,34 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
     private(set) var updateCalls: [UpdateCall] = []
     private(set) var createCalls: [CreateCall] = []
     private(set) var promptCalls: [PromptCall] = []
+    private(set) var initializeGitRepositoryCalls: [String] = []
     private(set) var permissionsRequests: [String] = []
     private(set) var questionsRequests: [String] = []
     private(set) var messagesRequests: [(sessionID: String, directory: String)] = []
     private(set) var todosRequests: [(sessionID: String, directory: String)] = []
     private var sessionsByID: [String: OpenCodeSession]
     private var messageEnvelopesBySessionID: [String: [OpenCodeMessageEnvelope]] = [:]
+    private var availableProjects: [OpenCodeProject]
+    private let availablePathInfo: OpenCodePathInfo
+    private var initializedProjectsByDirectory: [String: OpenCodeProject]
     private var sessionSerial = 0
 
-    init(sessions: [OpenCodeSession]) {
+    init(
+        sessions: [OpenCodeSession],
+        projects: [OpenCodeProject] = [],
+        pathInfo: OpenCodePathInfo = .init(
+            home: "/tmp",
+            state: "/tmp/state",
+            config: "/tmp/config",
+            worktree: "/tmp",
+            directory: "/tmp"
+        ),
+        initializedProjectsByDirectory: [String: OpenCodeProject] = [:]
+    ) {
         sessionsByID = Dictionary(uniqueKeysWithValues: sessions.map { ($0.id, $0) })
+        availableProjects = projects
+        availablePathInfo = pathInfo
+        self.initializedProjectsByDirectory = initializedProjectsByDirectory
     }
 
     func updateSession(
@@ -236,13 +294,26 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
     }
 
     func health() async throws -> OpenCodeHealth { fatalError("unused") }
-    func pathInfo(directory: String?) async throws -> OpenCodePathInfo { fatalError("unused") }
+    func pathInfo(directory: String?) async throws -> OpenCodePathInfo {
+        if let directory {
+            return .init(
+                home: availablePathInfo.home,
+                state: availablePathInfo.state,
+                config: availablePathInfo.config,
+                worktree: directory,
+                directory: directory
+            )
+        }
+        return availablePathInfo
+    }
     func config(directory: String?) async throws -> OpenCodeConfig { fatalError("unused") }
     func configProviders(directory: String?) async throws -> OpenCodeConfigProviders { fatalError("unused") }
     func agents() async throws -> [OpenCodeAgent] { [] }
-    func projects() async throws -> [OpenCodeProject] { fatalError("unused") }
-    func sessions(directory: String) async throws -> [OpenCodeSession] { fatalError("unused") }
-    func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus] { fatalError("unused") }
+    func projects() async throws -> [OpenCodeProject] { availableProjects }
+    func sessions(directory: String) async throws -> [OpenCodeSession] {
+        sessionsByID.values.filter { $0.directory == directory }
+    }
+    func sessionStatuses(directory: String) async throws -> [String: OpenCodeSessionStatus] { [:] }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession {
         createCalls.append(.init(directory: directory, title: title))
         sessionSerial += 1
@@ -283,7 +354,22 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         cols: Int?
     ) async throws -> OpenCodePTY { fatalError("unused") }
     func removePTY(ptyID: String, directory: String) async throws {}
-    func initializeGitRepository(directory: String) async throws -> OpenCodeProject { fatalError("unused") }
+    func initializeGitRepository(directory: String) async throws -> OpenCodeProject {
+        initializeGitRepositoryCalls.append(directory)
+
+        let created = initializedProjectsByDirectory[directory] ?? TestFixtures.project(
+            id: "project-\(UUID().uuidString)",
+            worktree: directory,
+            updatedAt: Date().timeIntervalSince1970
+        )
+
+        if let existingIndex = availableProjects.firstIndex(where: { $0.id == created.id }) {
+            availableProjects[existingIndex] = created
+        } else {
+            availableProjects.append(created)
+        }
+        return created
+    }
     func sendPrompt(
         sessionID: String,
         directory: String,

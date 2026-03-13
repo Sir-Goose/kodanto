@@ -658,6 +658,14 @@ final class KodantoAppModel {
                 try await refreshAll(using: client, scope: .liveData)
 
                 guard let refreshedProject = projects.first(where: { $0.id == createdProject.id }) else { return }
+                if let firstProjectID = projects.first?.id, firstProjectID != refreshedProject.id {
+                    workspaceStore.moveProject(
+                        refreshedProject.id,
+                        relativeTo: firstProjectID,
+                        placement: .before,
+                        profileID: selectedProfileID
+                    )
+                }
                 workspaceStore.selectProject(refreshedProject.id)
                 syncSelectionContext(resetSessionState: true)
 
