@@ -6,7 +6,10 @@ struct MainSessionDetailPane: View {
     let splitViewVisibility: NavigationSplitViewVisibility
 
     @State private var promptEditorHeight: CGFloat = 0
+    @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
     @State private var transcriptDisclosureStore = TranscriptDisclosureStore()
+
+    private let transcriptScrollTarget = "transcript-bottom"
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -16,7 +19,6 @@ struct MainSessionDetailPane: View {
     private static let composerOuterPadding: CGFloat = 16
     private static let composerInnerPadding: CGFloat = 14
     private static let composerContentGap: CGFloat = 12
-    private static let transcriptBottomClearance: CGFloat = composerOuterPadding + 12
     private static let collapsedHeaderLeadingInset: CGFloat = 124
 
     private var promptLineHeight: CGFloat {
@@ -39,8 +41,16 @@ struct MainSessionDetailPane: View {
         model.workspaceStore.selectedSessionID
     }
 
+    private var selectedSessionMessages: [OpenCodeMessageEnvelope] {
+        model.sessionDetailStore.selectedSessionMessages
+    }
+
     private var selectedSessionTurns: [TranscriptTurn] {
         model.sessionDetailStore.selectedSessionTurns
+    }
+
+    private var selectedSessionTranscriptRevision: Int {
+        model.sessionDetailStore.selectedSessionTranscriptRevision
     }
 
     private var sessionTodos: [OpenCodeTodo] {
@@ -65,10 +75,6 @@ struct MainSessionDetailPane: View {
 
     private var isSelectedSessionRunning: Bool {
         model.workspaceStore.isSelectedSessionRunning
-    }
-
-    private var transcriptHasVisibleContent: Bool {
-        !selectedSessionTurns.isEmpty || !sessionTodos.isEmpty || !permissions.isEmpty || !questions.isEmpty
     }
 
     var body: some View {
@@ -159,28 +165,46 @@ struct MainSessionDetailPane: View {
     }
 
     private var transcriptPanel: some View {
-        TranscriptScrollContainer(
-            sessionID: selectedSessionID,
-            isRunning: isSelectedSessionRunning,
-            hasVisibleContent: transcriptHasVisibleContent
-        ) {
-            transcriptDocumentContent
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    transcriptTurns
+                    transcriptBottomAnchor
+                }
+                .id("transcript-\(selectedSessionID ?? "none")-\(selectedSessionTranscriptRevision)")
+                .padding()
+                .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+            .defaultScrollAnchor(.bottom)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .onAppear {
+                pendingInitialBottomSessionID = selectedSessionID
+                jumpTranscriptToBottom(using: proxy)
+            }
+            .onChange(of: selectedSessionID) { _, sessionID in
+                pendingInitialBottomSessionID = sessionID
+                transcriptDisclosureStore.reset()
+                jumpTranscriptToBottom(using: proxy)
+            }
+            .onChange(of: selectedSessionTranscriptRevision) { _, _ in
+                handleTranscriptChange(using: proxy)
+            }
+            .onChange(of: sessionTodos.count) { _, _ in
+                handleTranscriptChange(using: proxy)
+            }
+            .onChange(of: permissions.count) { _, _ in
+                handleTranscriptChange(using: proxy)
+            }
+            .onChange(of: questions.count) { _, _ in
+                handleTranscriptChange(using: proxy)
+            }
+            .onChange(of: isSelectedSessionRunning) { _, isRunning in
+                if isRunning {
+                    scrollTranscriptToBottom(using: proxy)
+                }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onChange(of: selectedSessionID) { _, _ in
-            transcriptDisclosureStore.reset()
-        }
-    }
-
-    private var transcriptDocumentContent: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            transcriptTurns
-            Color.clear
-                .frame(height: Self.transcriptBottomClearance)
-        }
-        .padding()
-        .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var transcriptTurns: some View {
@@ -197,6 +221,12 @@ struct MainSessionDetailPane: View {
                 disclosureStore: transcriptDisclosureStore
             )
         }
+    }
+
+    private var transcriptBottomAnchor: some View {
+        Color.clear
+            .frame(height: 1)
+            .id(transcriptScrollTarget)
     }
 
     private func composer(maxHeight: CGFloat) -> some View {
@@ -305,486 +335,42 @@ struct MainSessionDetailPane: View {
         .background(.thinMaterial)
         .animation(.easeInOut(duration: 0.16), value: splitViewVisibility)
     }
-}
 
-private struct TranscriptScrollContainer<Content: View>: NSViewRepresentable {
-    let sessionID: OpenCodeSession.ID?
-    let isRunning: Bool
-    let hasVisibleContent: Bool
-    let content: Content
-
-    init(
-        sessionID: OpenCodeSession.ID?,
-        isRunning: Bool,
-        hasVisibleContent: Bool,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.sessionID = sessionID
-        self.isRunning = isRunning
-        self.hasVisibleContent = hasVisibleContent
-        self.content = content()
+    private func scrollTranscriptToBottomIfNeeded(using proxy: ScrollViewProxy) {
+        guard isSelectedSessionRunning else { return }
+        scrollTranscriptToBottom(using: proxy)
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
+    private func handleTranscriptChange(using proxy: ScrollViewProxy) {
+        guard let selectedSessionID else { return }
+
+        if pendingInitialBottomSessionID == selectedSessionID {
+            jumpTranscriptToBottom(using: proxy)
+
+            if transcriptHasVisibleContent {
+                pendingInitialBottomSessionID = nil
+            }
+            return
+        }
+
+        scrollTranscriptToBottomIfNeeded(using: proxy)
     }
 
-    func makeNSView(context: Context) -> TranscriptScrollContainerView {
-        let view = TranscriptScrollContainerView()
-        context.coordinator.install(in: view)
-        return view
+    private var transcriptHasVisibleContent: Bool {
+        !selectedSessionMessages.isEmpty || !sessionTodos.isEmpty || !permissions.isEmpty || !questions.isEmpty
     }
 
-    func updateNSView(_ nsView: TranscriptScrollContainerView, context: Context) {
-        context.coordinator.update(
-            in: nsView,
-            sessionID: sessionID,
-            isRunning: isRunning,
-            hasVisibleContent: hasVisibleContent,
-            content: AnyView(content)
-        )
-    }
+    private func jumpTranscriptToBottom(using proxy: ScrollViewProxy) {
+        let transaction = Transaction(animation: nil)
 
-    static func dismantleNSView(_ nsView: TranscriptScrollContainerView, coordinator: Coordinator) {
-        coordinator.detach()
-    }
-
-    final class Coordinator {
-        private let documentView = TranscriptDocumentView()
-        private let hostingView = NSHostingView(rootView: AnyView(EmptyView()))
-
-        private weak var containerView: TranscriptScrollContainerView?
-        private var boundsObserver: NSObjectProtocol?
-        private var frameObserver: NSObjectProtocol?
-        private var sessionID: OpenCodeSession.ID?
-        private var isRunning = false
-        private var hasVisibleContent = false
-        private var pendingInitialBottomAlignment = true
-        private var userScrolled = false
-        private var previousDistanceFromBottom: CGFloat = 0
-        private var contentHeight: CGFloat = 0
-        private var viewportHeight: CGFloat = 0
-        private var settlingUntil: Date?
-        private var programmaticBottomScrollMarker: TranscriptAutoFollow.ProgrammaticBottomScrollMarker?
-        private var isSynchronizingLayout = false
-
-        init() {
-            hostingView.translatesAutoresizingMaskIntoConstraints = true
-        }
-
-        func install(in view: TranscriptScrollContainerView) {
-            if containerView !== view {
-                detachObservers()
-                containerView = view
-                configureScrollView(view.scrollView)
-                observeClipView(of: view.scrollView)
-            }
-
-            if hostingView.superview !== documentView {
-                hostingView.removeFromSuperview()
-                documentView.addSubview(hostingView)
-            }
-
-            if view.scrollView.documentView !== documentView {
-                view.scrollView.documentView = documentView
-            }
-        }
-
-        func detach() {
-            detachObservers()
-            containerView = nil
-        }
-
-        func update(
-            in view: TranscriptScrollContainerView,
-            sessionID: OpenCodeSession.ID?,
-            isRunning: Bool,
-            hasVisibleContent: Bool,
-            content: AnyView
-        ) {
-            install(in: view)
-
-            let now = Date()
-            if self.sessionID != sessionID {
-                self.sessionID = sessionID
-                pendingInitialBottomAlignment = true
-                userScrolled = false
-                previousDistanceFromBottom = 0
-                contentHeight = 0
-                viewportHeight = 0
-                settlingUntil = nil
-                programmaticBottomScrollMarker = nil
-            }
-
-            if isRunning {
-                settlingUntil = nil
-            } else if self.isRunning {
-                settlingUntil = now.addingTimeInterval(TranscriptAutoFollow.settlingDuration)
-            }
-
-            self.isRunning = isRunning
-            self.hasVisibleContent = hasVisibleContent
-            hostingView.rootView = content
-            hostingView.invalidateIntrinsicContentSize()
-
-            let shouldForceInitialBottomAlignment = pendingInitialBottomAlignment && hasVisibleContent
-            synchronizeLayoutAndScroll(in: view.scrollView, now: now, forceScrollToBottom: shouldForceInitialBottomAlignment)
-
-            if shouldForceInitialBottomAlignment {
-                pendingInitialBottomAlignment = false
-            }
-        }
-
-        private func configureScrollView(_ scrollView: NSScrollView) {
-            scrollView.drawsBackground = false
-            scrollView.borderType = .noBorder
-            scrollView.hasHorizontalScroller = false
-            scrollView.hasVerticalScroller = true
-            scrollView.autohidesScrollers = true
-            scrollView.scrollerStyle = .overlay
-            scrollView.automaticallyAdjustsContentInsets = false
-            scrollView.contentInsets = NSEdgeInsets()
-            scrollView.contentView.postsBoundsChangedNotifications = true
-            scrollView.contentView.postsFrameChangedNotifications = true
-        }
-
-        private func observeClipView(of scrollView: NSScrollView) {
-            let clipView = scrollView.contentView
-            boundsObserver = NotificationCenter.default.addObserver(
-                forName: NSView.boundsDidChangeNotification,
-                object: clipView,
-                queue: .main
-            ) { [weak self] _ in
-                self?.handleBoundsDidChange(for: scrollView)
-            }
-
-            frameObserver = NotificationCenter.default.addObserver(
-                forName: NSView.frameDidChangeNotification,
-                object: clipView,
-                queue: .main
-            ) { [weak self] _ in
-                self?.handleViewportFrameDidChange(for: scrollView)
-            }
-        }
-
-        private func detachObservers() {
-            if let boundsObserver {
-                NotificationCenter.default.removeObserver(boundsObserver)
-            }
-            if let frameObserver {
-                NotificationCenter.default.removeObserver(frameObserver)
-            }
-            boundsObserver = nil
-            frameObserver = nil
-        }
-
-        private func handleBoundsDidChange(for scrollView: NSScrollView) {
-            guard !isSynchronizingLayout else { return }
-
-            let now = Date()
-            pruneExpiredProgrammaticMarker(now: now)
-
-            let currentOffset = scrollView.contentView.bounds.minY
-            let isProgrammatic = TranscriptAutoFollow.matchesProgrammaticBottomScroll(
-                currentOffset: currentOffset,
-                marker: programmaticBottomScrollMarker,
-                now: now
-            )
-            let isUserDriven = TranscriptAutoFollow.isUserDrivenScrollEvent(
-                NSApp.currentEvent,
-                in: scrollView
-            ) && !isProgrammatic
-
-            updateScrollState(in: scrollView, isUserDriven: isUserDriven)
-        }
-
-        private func handleViewportFrameDidChange(for scrollView: NSScrollView) {
-            synchronizeLayoutAndScroll(in: scrollView, now: Date())
-        }
-
-        private func synchronizeLayoutAndScroll(
-            in scrollView: NSScrollView,
-            now: Date,
-            forceScrollToBottom: Bool = false
-        ) {
-            guard !isSynchronizingLayout else { return }
-            isSynchronizingLayout = true
-            defer { isSynchronizingLayout = false }
-
-            layoutDocumentView(in: scrollView)
-            clampVisibleOffsetIfNeeded(in: scrollView)
-            pruneExpiredProgrammaticMarker(now: now)
-
-            if forceScrollToBottom || shouldKeepPinnedToBottom(now: now) {
-                scrollToBottom(in: scrollView, now: now)
-            }
-
-            updateScrollState(in: scrollView, isUserDriven: false)
-        }
-
-        private func layoutDocumentView(in scrollView: NSScrollView) {
-            let resolvedWidth = max(1, floor(scrollView.contentSize.width))
-            let previousHeight = max(1, ceil(contentHeight))
-
-            hostingView.frame = CGRect(x: 0, y: 0, width: resolvedWidth, height: previousHeight)
-            hostingView.layoutSubtreeIfNeeded()
-
-            var resolvedHeight = max(1, ceil(hostingView.fittingSize.height))
-            documentView.frame = CGRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
-            hostingView.frame = documentView.bounds
-            hostingView.layoutSubtreeIfNeeded()
-
-            let adjustedHeight = max(1, ceil(hostingView.fittingSize.height))
-            if abs(adjustedHeight - resolvedHeight) > 0.5 {
-                resolvedHeight = adjustedHeight
-                documentView.frame = CGRect(x: 0, y: 0, width: resolvedWidth, height: resolvedHeight)
-                hostingView.frame = documentView.bounds
-            }
-
-            contentHeight = resolvedHeight
-            viewportHeight = max(0, scrollView.contentView.bounds.height)
-            scrollView.hasVerticalScroller = contentHeight - viewportHeight > 1
-        }
-
-        private func clampVisibleOffsetIfNeeded(in scrollView: NSScrollView) {
-            let currentOffset = scrollView.contentView.bounds.minY
-            let clampedOffset = max(
-                0,
-                min(
-                    currentOffset,
-                    TranscriptAutoFollow.bottomScrollOffset(
-                        contentHeight: contentHeight,
-                        viewportHeight: viewportHeight
-                    )
-                )
-            )
-
-            if abs(clampedOffset - currentOffset) > 0.5 {
-                scrollView.contentView.scroll(to: NSPoint(x: 0, y: clampedOffset))
-            }
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
-
-        private func scrollToBottom(in scrollView: NSScrollView, now: Date) {
-            let targetOffset = TranscriptAutoFollow.bottomScrollOffset(
-                contentHeight: contentHeight,
-                viewportHeight: viewportHeight
-            )
-            programmaticBottomScrollMarker = .init(offset: targetOffset, timestamp: now)
-
-            let currentOffset = scrollView.contentView.bounds.minY
-            guard abs(currentOffset - targetOffset) > TranscriptAutoFollow.programmaticScrollOffsetEpsilon else {
-                return
-            }
-
-            scrollView.contentView.scroll(to: NSPoint(x: 0, y: targetOffset))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
-
-        private func updateScrollState(in scrollView: NSScrollView, isUserDriven: Bool) {
-            let currentOffset = scrollView.contentView.bounds.minY
-            let distanceFromBottom = TranscriptAutoFollow.distanceFromBottom(
-                contentHeight: contentHeight,
-                viewportHeight: viewportHeight,
-                scrollOffset: currentOffset
-            )
-
-            userScrolled = TranscriptAutoFollow.updatedDetachmentState(
-                wasDetachedByUser: userScrolled,
-                previousDistanceFromBottom: previousDistanceFromBottom,
-                newDistanceFromBottom: distanceFromBottom,
-                isUserDriven: isUserDriven
-            )
-            previousDistanceFromBottom = distanceFromBottom
-        }
-
-        private func shouldKeepPinnedToBottom(now: Date) -> Bool {
-            TranscriptAutoFollow.shouldKeepPinnedToBottom(
-                isRunning: isRunning,
-                isSettlingAfterRun: TranscriptAutoFollow.isSettlingAfterRun(
-                    settlingUntil: settlingUntil,
-                    now: now
-                ),
-                isDetachedByUser: userScrolled
-            )
-        }
-
-        private func pruneExpiredProgrammaticMarker(now: Date) {
-            guard let programmaticBottomScrollMarker else { return }
-            if now.timeIntervalSince(programmaticBottomScrollMarker.timestamp) > TranscriptAutoFollow.programmaticScrollTimeout {
-                self.programmaticBottomScrollMarker = nil
+        DispatchQueue.main.async {
+            withTransaction(transaction) {
+                proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
             }
         }
     }
-}
 
-private final class TranscriptScrollContainerView: NSView {
-    let scrollView = TranscriptRootScrollView()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scrollView)
-
-        NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-}
-
-private final class TranscriptRootScrollView: NSScrollView {
-    override var acceptsFirstResponder: Bool { true }
-}
-
-private final class TranscriptDocumentView: NSView {
-    override var isFlipped: Bool { true }
-}
-
-enum TranscriptAutoFollow {
-    static let nearBottomThreshold: CGFloat = 120
-    static let bottomReattachEpsilon: CGFloat = 1
-    static let programmaticScrollOffsetEpsilon: CGFloat = 2
-    static let programmaticScrollTimeout: TimeInterval = 1.5
-    static let settlingDuration: TimeInterval = 0.3
-
-    struct ProgrammaticBottomScrollMarker: Equatable {
-        let offset: CGFloat
-        let timestamp: Date
-    }
-
-    static func distanceFromBottom(viewportBottom: CGFloat, contentBottom: CGFloat) -> CGFloat {
-        clampDistance(contentBottom - viewportBottom)
-    }
-
-    static func distanceFromBottom(
-        contentHeight: CGFloat,
-        viewportHeight: CGFloat,
-        scrollOffset: CGFloat
-    ) -> CGFloat {
-        clampDistance(bottomScrollOffset(contentHeight: contentHeight, viewportHeight: viewportHeight) - scrollOffset)
-    }
-
-    static func bottomScrollOffset(contentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
-        max(0, contentHeight - viewportHeight)
-    }
-
-    static func clampDistance(_ distance: CGFloat) -> CGFloat {
-        max(0, distance)
-    }
-
-    static func isNearBottom(
-        distanceFromBottom: CGFloat,
-        threshold: CGFloat = nearBottomThreshold
-    ) -> Bool {
-        clampDistance(distanceFromBottom) <= threshold
-    }
-
-    static func isNearBottom(
-        viewportBottom: CGFloat,
-        contentBottom: CGFloat,
-        threshold: CGFloat = nearBottomThreshold
-    ) -> Bool {
-        isNearBottom(
-            distanceFromBottom: distanceFromBottom(
-                viewportBottom: viewportBottom,
-                contentBottom: contentBottom
-            ),
-            threshold: threshold
-        )
-    }
-
-    static func isAtBottom(
-        distanceFromBottom: CGFloat,
-        epsilon: CGFloat = bottomReattachEpsilon
-    ) -> Bool {
-        clampDistance(distanceFromBottom) <= epsilon
-    }
-
-    static func updatedDetachmentState(
-        wasDetachedByUser: Bool,
-        previousDistanceFromBottom: CGFloat,
-        newDistanceFromBottom: CGFloat,
-        isUserDriven: Bool,
-        reattachEpsilon: CGFloat = bottomReattachEpsilon
-    ) -> Bool {
-        if isAtBottom(distanceFromBottom: newDistanceFromBottom, epsilon: reattachEpsilon) {
-            return false
-        }
-
-        guard isUserDriven else {
-            return wasDetachedByUser
-        }
-
-        if wasDetachedByUser {
-            return true
-        }
-
-        let previousDistance = clampDistance(previousDistanceFromBottom)
-        let nextDistance = clampDistance(newDistanceFromBottom)
-        return nextDistance > max(previousDistance, reattachEpsilon)
-    }
-
-    static func shouldKeepPinnedToBottom(
-        isRunning: Bool,
-        isSettlingAfterRun: Bool,
-        isDetachedByUser: Bool
-    ) -> Bool {
-        (isRunning || isSettlingAfterRun) && !isDetachedByUser
-    }
-
-    static func isSettlingAfterRun(
-        settlingUntil: Date?,
-        now: Date
-    ) -> Bool {
-        guard let settlingUntil else { return false }
-        return now < settlingUntil
-    }
-
-    static func matchesProgrammaticBottomScroll(
-        currentOffset: CGFloat,
-        marker: ProgrammaticBottomScrollMarker?,
-        now: Date,
-        epsilon: CGFloat = programmaticScrollOffsetEpsilon,
-        timeout: TimeInterval = programmaticScrollTimeout
-    ) -> Bool {
-        guard let marker else { return false }
-        guard now.timeIntervalSince(marker.timestamp) <= timeout else { return false }
-        return abs(currentOffset - marker.offset) <= epsilon
-    }
-
-    static func isUserDrivenScrollEvent(_ event: NSEvent?, in scrollView: NSScrollView) -> Bool {
-        guard let event else { return false }
-
-        switch event.type {
-        case .scrollWheel:
-            return !targetsNestedScrollView(event, rootScrollView: scrollView)
-        case .leftMouseDown,
-             .leftMouseDragged,
-             .rightMouseDragged,
-             .otherMouseDragged,
-             .swipe,
-             .magnify,
-             .gesture,
-             .keyDown:
-            return true
-        default:
-            return false
-        }
-    }
-
-    static func targetsNestedScrollView(_ event: NSEvent, rootScrollView: NSScrollView) -> Bool {
-        guard let window = rootScrollView.window ?? event.window else { return false }
-        let hitView = window.contentView?.hitTest(event.locationInWindow)
-        guard let targetScrollView = hitView?.enclosingScrollView else { return false }
-        return targetScrollView !== rootScrollView
+    private func scrollTranscriptToBottom(using proxy: ScrollViewProxy) {
+        jumpTranscriptToBottom(using: proxy)
     }
 }

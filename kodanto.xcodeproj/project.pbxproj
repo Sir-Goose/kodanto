@@ -21,7 +21,6 @@
 		55E4C2092F7000010A000001 /* TerminalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C20A2F7000010A000001 /* TerminalStoreTests.swift */; };
 		55E4C20B2F7000010A000001 /* TerminalLayoutStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C20C2F7000010A000001 /* TerminalLayoutStoreTests.swift */; };
 		66A1B0012F8000010B000001 /* TerminalPanelSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A1B0022F8000010B000001 /* TerminalPanelSizingTests.swift */; };
-		66A1B0032F8000010B000001 /* TranscriptAutoFollowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A1B0042F8000010B000001 /* TranscriptAutoFollowTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -51,7 +50,6 @@
 		55E4C20A2F7000010A000001 /* TerminalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalStoreTests.swift; sourceTree = "<group>"; };
 		55E4C20C2F7000010A000001 /* TerminalLayoutStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLayoutStoreTests.swift; sourceTree = "<group>"; };
 		66A1B0022F8000010B000001 /* TerminalPanelSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPanelSizingTests.swift; sourceTree = "<group>"; };
-		66A1B0042F8000010B000001 /* TranscriptAutoFollowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptAutoFollowTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -108,7 +106,6 @@
 				55E4C20A2F7000010A000001 /* TerminalStoreTests.swift */,
 				55E4C20C2F7000010A000001 /* TerminalLayoutStoreTests.swift */,
 				66A1B0022F8000010B000001 /* TerminalPanelSizingTests.swift */,
-				66A1B0042F8000010B000001 /* TranscriptAutoFollowTests.swift */,
 			);
 			path = kodantoTests;
 			sourceTree = "<group>";
@@ -231,7 +228,6 @@
 				55E4C2092F7000010A000001 /* TerminalStoreTests.swift in Sources */,
 				55E4C20B2F7000010A000001 /* TerminalLayoutStoreTests.swift in Sources */,
 				66A1B0012F8000010B000001 /* TerminalPanelSizingTests.swift in Sources */,
-				66A1B0032F8000010B000001 /* TranscriptAutoFollowTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
