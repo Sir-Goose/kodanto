@@ -255,12 +255,14 @@ final class KodantoAppModel {
         }
     }
 
-    func setTerminalPanelHeight(_ value: Double) {
+    func setTerminalPanelHeight(_ value: Double, persist: Bool = true) {
         guard value.isFinite else { return }
         let clamped = max(140, value)
         guard terminalPanelHeight != clamped else { return }
         terminalPanelHeight = clamped
-        persistTerminalLayout()
+        if persist {
+            persistTerminalLayout()
+        }
     }
 
     func consumeTerminalOutputChunks() -> [String] {

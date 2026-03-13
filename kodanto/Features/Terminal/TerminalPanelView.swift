@@ -4,12 +4,13 @@ struct TerminalPanelView: View {
     @Bindable var model: KodantoAppModel
     let availableHeight: CGFloat
 
-    @State private var dragStartHeight: CGFloat?
+    @State private var dragAnchor: DragAnchor?
 
     private static let minimumHeight: CGFloat = 140
 
-    private var maximumHeight: CGFloat {
-        max(Self.minimumHeight, availableHeight * 0.6)
+    private struct DragAnchor {
+        let startHeight: CGFloat
+        let startMouseY: CGFloat
     }
 
     private var resolvedHeight: CGFloat {
@@ -61,18 +62,38 @@ struct TerminalPanelView: View {
         .frame(height: 12)
         .contentShape(Rectangle())
         .gesture(
-            DragGesture(minimumDistance: 0)
+            DragGesture(minimumDistance: 0, coordinateSpace: .global)
                 .onChanged { value in
-                    if dragStartHeight == nil {
-                        dragStartHeight = resolvedHeight
+                    if dragAnchor == nil {
+                        dragAnchor = DragAnchor(
+                            startHeight: resolvedHeight,
+                            startMouseY: value.startLocation.y
+                        )
                     }
 
-                    let base = dragStartHeight ?? resolvedHeight
-                    let next = min(max(base - value.translation.height, Self.minimumHeight), maximumHeight)
-                    model.setTerminalPanelHeight(Double(next))
+                    guard let dragAnchor else { return }
+
+                    let next = TerminalPanelSizing.draggedHeight(
+                        startHeight: dragAnchor.startHeight,
+                        startMouseY: dragAnchor.startMouseY,
+                        currentMouseY: value.location.y,
+                        availableHeight: availableHeight,
+                        minimumHeight: Self.minimumHeight
+                    )
+                    model.setTerminalPanelHeight(Double(next), persist: false)
                 }
-                .onEnded { _ in
-                    dragStartHeight = nil
+                .onEnded { value in
+                    defer { dragAnchor = nil }
+                    guard let dragAnchor else { return }
+
+                    let final = TerminalPanelSizing.draggedHeight(
+                        startHeight: dragAnchor.startHeight,
+                        startMouseY: dragAnchor.startMouseY,
+                        currentMouseY: value.location.y,
+                        availableHeight: availableHeight,
+                        minimumHeight: Self.minimumHeight
+                    )
+                    model.setTerminalPanelHeight(Double(final), persist: true)
                 }
         )
         .help("Drag to resize terminal")
@@ -150,5 +171,21 @@ enum TerminalPanelSizing {
     static func clampedHeight(preferredHeight: CGFloat, availableHeight: CGFloat, minimumHeight: CGFloat) -> CGFloat {
         let maxHeight = max(minimumHeight, availableHeight * 0.6)
         return min(max(preferredHeight, minimumHeight), maxHeight)
+    }
+
+    static func draggedHeight(
+        startHeight: CGFloat,
+        startMouseY: CGFloat,
+        currentMouseY: CGFloat,
+        availableHeight: CGFloat,
+        minimumHeight: CGFloat
+    ) -> CGFloat {
+        let pointerDeltaY = currentMouseY - startMouseY
+        let preferredHeight = startHeight - pointerDeltaY
+        return clampedHeight(
+            preferredHeight: preferredHeight,
+            availableHeight: availableHeight,
+            minimumHeight: minimumHeight
+        )
     }
 }

@@ -20,6 +20,7 @@
 		55E4C2072F7000010A000001 /* KodantoAppModelSessionActionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C2082F7000010A000001 /* KodantoAppModelSessionActionsTests.swift */; };
 		55E4C2092F7000010A000001 /* TerminalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C20A2F7000010A000001 /* TerminalStoreTests.swift */; };
 		55E4C20B2F7000010A000001 /* TerminalLayoutStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55E4C20C2F7000010A000001 /* TerminalLayoutStoreTests.swift */; };
+		66A1B0012F8000010B000001 /* TerminalPanelSizingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A1B0022F8000010B000001 /* TerminalPanelSizingTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +49,7 @@
 		55E4C2082F7000010A000001 /* KodantoAppModelSessionActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KodantoAppModelSessionActionsTests.swift; sourceTree = "<group>"; };
 		55E4C20A2F7000010A000001 /* TerminalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalStoreTests.swift; sourceTree = "<group>"; };
 		55E4C20C2F7000010A000001 /* TerminalLayoutStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLayoutStoreTests.swift; sourceTree = "<group>"; };
+		66A1B0022F8000010B000001 /* TerminalPanelSizingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalPanelSizingTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -103,6 +105,7 @@
 				55E4C2082F7000010A000001 /* KodantoAppModelSessionActionsTests.swift */,
 				55E4C20A2F7000010A000001 /* TerminalStoreTests.swift */,
 				55E4C20C2F7000010A000001 /* TerminalLayoutStoreTests.swift */,
+				66A1B0022F8000010B000001 /* TerminalPanelSizingTests.swift */,
 			);
 			path = kodantoTests;
 			sourceTree = "<group>";
@@ -224,6 +227,7 @@
 				55E4C2072F7000010A000001 /* KodantoAppModelSessionActionsTests.swift in Sources */,
 				55E4C2092F7000010A000001 /* TerminalStoreTests.swift in Sources */,
 				55E4C20B2F7000010A000001 /* TerminalLayoutStoreTests.swift in Sources */,
+				66A1B0012F8000010B000001 /* TerminalPanelSizingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
