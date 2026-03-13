@@ -28,6 +28,7 @@ enum MessageMarkdownRenderer {
     enum Block: Equatable {
         case paragraph(AttributedString)
         case heading(level: Int, text: AttributedString)
+        case horizontalRule
         case list(items: [ListItem])
         case codeBlock(language: String?, code: String)
         case table(TableData)
@@ -158,6 +159,14 @@ enum MessageMarkdownRenderer {
                 continue
             }
 
+            if isHorizontalRule(line) {
+                flushParagraph()
+                flushList()
+                blocks.append(.horizontalRule)
+                index += 1
+                continue
+            }
+
             if let listItem = parseListItem(from: line) {
                 flushParagraph()
                 if let currentListKind, currentListKind != listItem.kind {
@@ -253,6 +262,17 @@ enum MessageMarkdownRenderer {
         guard remainder.first == " " else { return nil }
 
         return Heading(level: hashes.count, text: String(remainder.dropFirst()))
+    }
+
+    private static func isHorizontalRule(_ line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+
+        let compact = trimmed.filter { !$0.isWhitespace }
+        guard compact.count >= 3, let marker = compact.first else { return false }
+        guard marker == "-" || marker == "*" || marker == "_" else { return false }
+
+        return compact.allSatisfy { $0 == marker }
     }
 
     private static func parseListItem(from line: String) -> ParsedListItem? {
@@ -394,6 +414,10 @@ private struct MarkdownBlockView: View {
             Text(text)
                 .font(font(for: level))
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case .horizontalRule:
+            Rectangle()
+                .fill(Color.secondary.opacity(0.18))
+                .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
         case .list(let items):
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in

@@ -117,6 +117,91 @@ final class MessageMarkdownRendererTests: XCTestCase {
         XCTAssertEqual(plain(table.rows[0]), ["Ada", "left|right"])
     }
 
+    func testParsesHyphenHorizontalRule() {
+        let blocks = MessageMarkdownRenderer.parseBlocks("---")
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case .horizontalRule = blocks[0] else {
+            return XCTFail("Expected horizontal rule.")
+        }
+    }
+
+    func testParsesSpacedHyphenHorizontalRuleBeforeList() {
+        let blocks = MessageMarkdownRenderer.parseBlocks("- - -")
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case .horizontalRule = blocks[0] else {
+            return XCTFail("Expected horizontal rule.")
+        }
+    }
+
+    func testParsesAsteriskAndUnderscoreHorizontalRules() {
+        for markdown in ["***", "___"] {
+            let blocks = MessageMarkdownRenderer.parseBlocks(markdown)
+
+            XCTAssertEqual(blocks.count, 1, "Expected one block for \(markdown)")
+            guard case .horizontalRule = blocks[0] else {
+                return XCTFail("Expected horizontal rule for \(markdown).")
+            }
+        }
+    }
+
+    func testTreatsTooShortHyphenSequenceAsParagraph() {
+        let blocks = MessageMarkdownRenderer.parseBlocks("--")
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case .paragraph(let paragraph) = blocks[0] else {
+            return XCTFail("Expected paragraph.")
+        }
+        XCTAssertEqual(plain(paragraph), "--")
+    }
+
+    func testParsesParagraphHorizontalRuleParagraphSequence() {
+        let markdown = """
+        First paragraph.
+        ---
+        Second paragraph.
+        """
+
+        let blocks = MessageMarkdownRenderer.parseBlocks(markdown)
+
+        XCTAssertEqual(blocks.count, 3)
+        guard case .paragraph(let firstParagraph) = blocks[0] else {
+            return XCTFail("Expected first paragraph.")
+        }
+        guard case .horizontalRule = blocks[1] else {
+            return XCTFail("Expected horizontal rule in middle.")
+        }
+        guard case .paragraph(let secondParagraph) = blocks[2] else {
+            return XCTFail("Expected second paragraph.")
+        }
+
+        XCTAssertEqual(plain(firstParagraph), "First paragraph.")
+        XCTAssertEqual(plain(secondParagraph), "Second paragraph.")
+    }
+
+    func testIgnoresHorizontalRuleSyntaxInsideFencedCodeBlock() {
+        let markdown = """
+        ```md
+        ---
+        * * *
+        ___
+        ```
+        """
+
+        let blocks = MessageMarkdownRenderer.parseBlocks(markdown)
+
+        XCTAssertEqual(blocks.count, 1)
+        guard case .codeBlock(let language, let code) = blocks[0] else {
+            return XCTFail("Expected code block.")
+        }
+
+        XCTAssertEqual(language, "md")
+        XCTAssertTrue(code.contains("---"))
+        XCTAssertTrue(code.contains("* * *"))
+        XCTAssertTrue(code.contains("___"))
+    }
+
     private func plain(_ attributed: AttributedString) -> String {
         String(attributed.characters)
     }

@@ -792,7 +792,7 @@ final class KodantoAppModel {
 
         sessionDetailStore.replaceMessages(loadedMessages)
         sessionDetailStore.replaceSessionTodos(loadedTodos)
-        composerStore.syncSelectedAgent(from: loadedMessages)
+        composerStore.syncSelectedAgent(from: loadedMessages, sessionID: selectedSessionID)
     }
 
     private func startLiveSync(for profile: ServerProfile) {
@@ -821,7 +821,7 @@ final class KodantoAppModel {
             sessionRequestStore: sessionRequestStore
         )
 
-        composerStore.syncSelectedAgent(from: sessionDetailStore.selectedSessionMessages)
+        composerStore.syncSelectedAgent(from: sessionDetailStore.selectedSessionMessages, sessionID: selectedSessionID)
 
         if effects.contains(.refresh) {
             refresh()

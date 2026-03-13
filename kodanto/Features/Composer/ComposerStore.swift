@@ -21,6 +21,8 @@ final class ComposerStore {
     private let modelSelectionStore: ModelSelectionStoring
     private let modelVariantSelectionStore: ModelVariantSelectionStoring
     private var selectedProfileID: UUID?
+    private var lastSyncedAgentSessionID: String?
+    private var lastSyncedAgentMessageID: String?
 
     init(
         modelSelectionStore: ModelSelectionStoring,
@@ -68,6 +70,8 @@ final class ComposerStore {
         availableModelGroups = []
         availablePrimaryAgents = []
         selectedAgentName = nil
+        lastSyncedAgentSessionID = nil
+        lastSyncedAgentMessageID = nil
         isLoadingModels = false
         modelLoadError = nil
     }
@@ -76,6 +80,8 @@ final class ComposerStore {
         availableModelGroups = []
         availablePrimaryAgents = []
         selectedAgentName = nil
+        lastSyncedAgentSessionID = nil
+        lastSyncedAgentMessageID = nil
         isLoadingModels = false
         modelLoadError = nil
     }
@@ -109,12 +115,28 @@ final class ComposerStore {
             ?? availablePrimaryAgents.first?.name
     }
 
-    func syncSelectedAgent(from messages: [OpenCodeMessageEnvelope]) {
-        guard let latestUserAgent = latestUserAgentName(in: messages) else { return }
+    func syncSelectedAgent(from messages: [OpenCodeMessageEnvelope], sessionID: String?) {
+        guard let sessionID else {
+            lastSyncedAgentSessionID = nil
+            lastSyncedAgentMessageID = nil
+            return
+        }
 
-        selectedAgentName = resolvedAgentSelection(latestUserAgent, availableAgents: availablePrimaryAgents)
+        guard let latestUser = latestUserMessage(in: messages) else {
+            lastSyncedAgentSessionID = sessionID
+            lastSyncedAgentMessageID = nil
+            return
+        }
+
+        let didSessionChange = lastSyncedAgentSessionID != sessionID
+        let didLatestUserMessageChange = lastSyncedAgentMessageID != latestUser.id
+        guard didSessionChange || didLatestUserMessageChange else { return }
+
+        selectedAgentName = resolvedAgentSelection(latestUser.agent, availableAgents: availablePrimaryAgents)
             ?? resolvedAgentSelection(selectedAgentName, availableAgents: availablePrimaryAgents)
             ?? availablePrimaryAgents.first?.name
+        lastSyncedAgentSessionID = sessionID
+        lastSyncedAgentMessageID = latestUser.id
     }
 
     func refreshModelCatalog(using client: OpenCodeAPIService) async throws {
@@ -272,10 +294,10 @@ final class ComposerStore {
         return value
     }
 
-    private func latestUserAgentName(in messages: [OpenCodeMessageEnvelope]) -> String? {
+    private func latestUserMessage(in messages: [OpenCodeMessageEnvelope]) -> OpenCodeMessage.User? {
         for envelope in messages.reversed() {
             guard case .user(let user) = envelope.info else { continue }
-            return normalizedAgentName(user.agent)
+            return user
         }
         return nil
     }

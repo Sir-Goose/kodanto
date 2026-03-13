@@ -116,7 +116,7 @@ final class ComposerAgentSelectionTests: XCTestCase {
                 self.makeUserEnvelope(messageID: "m2", sessionID: "session-1", createdAt: 2, agent: "plan")
             ]
 
-            store.syncSelectedAgent(from: messages)
+            store.syncSelectedAgent(from: messages, sessionID: "session-1")
 
             XCTAssertEqual(store.selectedPromptAgent, "plan")
         }
@@ -135,8 +135,60 @@ final class ComposerAgentSelectionTests: XCTestCase {
                 self.makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "my-custom-agent")
             ]
 
-            store.syncSelectedAgent(from: messages)
+            store.syncSelectedAgent(from: messages, sessionID: "session-1")
 
+            XCTAssertEqual(store.selectedPromptAgent, "build")
+        }
+    }
+
+    func testSyncSelectedAgentDoesNotOverrideManualSelectionWhenLatestUserMessageUnchanged() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            store.availablePrimaryAgents = [
+                self.makeAgent(name: "build", mode: "primary"),
+                self.makeAgent(name: "plan", mode: "primary")
+            ]
+
+            let messages: [OpenCodeMessageEnvelope] = [
+                self.makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "build")
+            ]
+
+            store.syncSelectedAgent(from: messages, sessionID: "session-1")
+            XCTAssertEqual(store.selectedPromptAgent, "build")
+
+            store.selectAgent("plan")
+            XCTAssertEqual(store.selectedPromptAgent, "plan")
+
+            store.syncSelectedAgent(from: messages, sessionID: "session-1")
+            XCTAssertEqual(store.selectedPromptAgent, "plan")
+        }
+    }
+
+    func testSyncSelectedAgentReappliesSessionHistoryWhenSwitchingSessions() async {
+        await runOnMainActor {
+            let store = self.makeStore()
+            store.availablePrimaryAgents = [
+                self.makeAgent(name: "build", mode: "primary"),
+                self.makeAgent(name: "plan", mode: "primary")
+            ]
+
+            let sessionOneMessages: [OpenCodeMessageEnvelope] = [
+                self.makeUserEnvelope(messageID: "m1", sessionID: "session-1", createdAt: 1, agent: "build")
+            ]
+            let sessionTwoMessages: [OpenCodeMessageEnvelope] = [
+                self.makeUserEnvelope(messageID: "m2", sessionID: "session-2", createdAt: 2, agent: "plan")
+            ]
+
+            store.syncSelectedAgent(from: sessionOneMessages, sessionID: "session-1")
+            XCTAssertEqual(store.selectedPromptAgent, "build")
+
+            store.selectAgent("plan")
+            XCTAssertEqual(store.selectedPromptAgent, "plan")
+
+            store.syncSelectedAgent(from: sessionTwoMessages, sessionID: "session-2")
+            XCTAssertEqual(store.selectedPromptAgent, "plan")
+
+            store.syncSelectedAgent(from: sessionOneMessages, sessionID: "session-1")
             XCTAssertEqual(store.selectedPromptAgent, "build")
         }
     }
