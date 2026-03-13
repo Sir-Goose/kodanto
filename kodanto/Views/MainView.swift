@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MainView: View {
@@ -55,22 +56,22 @@ struct MainView: View {
     }
 
     private var terminalToggleButton: some View {
-        Button {
+        let style = TerminalToggleButtonStyle.resolve(
+            isOpen: model.isTerminalPanelOpen,
+            isEnabled: model.canShowTerminal
+        )
+
+        return Button {
             model.toggleTerminalPanel()
         } label: {
-            Image(systemName: model.isTerminalPanelOpen ? "rectangle.bottomthird.inset.filled" : "rectangle.bottomthird.inset")
+            Image(systemName: style.symbolName)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(toggleButtonForeground)
+                .foregroundStyle(Color(nsColor: style.foreground))
                 .frame(width: 30, height: 28)
                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(
-                            model.isTerminalPanelOpen
-                                ? Color.accentColor.opacity(0.28)
-                                : Color.secondary.opacity(0.18),
-                            lineWidth: 1
-                        )
+                        .stroke(Color(nsColor: style.border), lineWidth: 1)
                 }
                 .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
                 .padding(.top, 8)
@@ -80,13 +81,6 @@ struct MainView: View {
         .disabled(!model.canShowTerminal)
         .opacity(model.canShowTerminal ? 1 : 0.55)
         .help("Toggle Terminal")
-    }
-
-    private var toggleButtonForeground: Color {
-        guard model.canShowTerminal else {
-            return .secondary
-        }
-        return model.isTerminalPanelOpen ? .accentColor : .primary
     }
 
     private var connectionStatusButton: some View {
@@ -362,5 +356,35 @@ struct MainView: View {
         default:
             return "Connect"
         }
+    }
+}
+
+struct TerminalToggleButtonStyle {
+    let symbolName: String
+    let foreground: NSColor
+    let border: NSColor
+
+    static func resolve(isOpen: Bool, isEnabled: Bool) -> TerminalToggleButtonStyle {
+        if !isEnabled {
+            return TerminalToggleButtonStyle(
+                symbolName: "rectangle.bottomthird.inset.filled",
+                foreground: .tertiaryLabelColor,
+                border: NSColor.tertiaryLabelColor.withAlphaComponent(0.32)
+            )
+        }
+
+        if isOpen {
+            return TerminalToggleButtonStyle(
+                symbolName: "rectangle.bottomthird.inset.filled",
+                foreground: .controlAccentColor,
+                border: NSColor.controlAccentColor.withAlphaComponent(0.28)
+            )
+        }
+
+        return TerminalToggleButtonStyle(
+            symbolName: "rectangle.bottomthird.inset.filled",
+            foreground: .labelColor,
+            border: NSColor.labelColor.withAlphaComponent(0.22)
+        )
     }
 }

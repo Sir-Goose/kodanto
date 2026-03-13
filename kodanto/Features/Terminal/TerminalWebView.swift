@@ -4,6 +4,7 @@ import WebKit
 
 struct TerminalWebView: NSViewRepresentable {
     let sessionID: String
+    let isVisible: Bool
     let outputRevision: Int
     let consumeOutput: () -> [String]
     let onInput: (String) -> Void
@@ -12,6 +13,7 @@ struct TerminalWebView: NSViewRepresentable {
     func makeCoordinator() -> Coordinator {
         Coordinator(
             sessionID: sessionID,
+            isVisible: isVisible,
             onInput: onInput,
             onResize: onResize
         )
@@ -23,6 +25,7 @@ struct TerminalWebView: NSViewRepresentable {
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
         context.coordinator.updateSessionIfNeeded(sessionID: sessionID)
+        context.coordinator.updateVisibilityIfNeeded(isVisible: isVisible)
 
         if context.coordinator.lastOutputRevision != outputRevision {
             context.coordinator.lastOutputRevision = outputRevision
@@ -44,15 +47,19 @@ struct TerminalWebView: NSViewRepresentable {
         var lastOutputRevision = 0
         private var webView: WKWebView?
         private var sessionID: String
+        private var isVisible: Bool
         private var isReady = false
+        private var pendingRefitOnReady = false
         private var pendingChunks: [String] = []
 
         init(
             sessionID: String,
+            isVisible: Bool,
             onInput: @escaping (String) -> Void,
             onResize: @escaping (Int, Int) -> Void
         ) {
             self.sessionID = sessionID
+            self.isVisible = isVisible
             self.onInput = onInput
             self.onResize = onResize
         }
@@ -82,8 +89,20 @@ struct TerminalWebView: NSViewRepresentable {
             guard self.sessionID != sessionID else { return }
             self.sessionID = sessionID
             isReady = false
+            pendingRefitOnReady = isVisible
             pendingChunks.removeAll(keepingCapacity: false)
             webView?.loadHTMLString(Self.html, baseURL: nil)
+        }
+
+        func updateVisibilityIfNeeded(isVisible: Bool) {
+            if TerminalWebViewVisibilityTransition.shouldRefit(
+                previous: self.isVisible,
+                current: isVisible
+            ) {
+                pendingRefitOnReady = true
+            }
+            self.isVisible = isVisible
+            applyPendingRefitIfPossible()
         }
 
         func enqueue(chunks: [String]) {
@@ -103,7 +122,15 @@ struct TerminalWebView: NSViewRepresentable {
             let encoded = data.base64EncodedString()
             webView.evaluateJavaScript("window.kodantoAppendBase64('\(encoded)')")
 
-            webView.evaluateJavaScript("window.kodantoFocus && window.kodantoFocus()")
+            if isVisible {
+                webView.evaluateJavaScript("window.kodantoFocus && window.kodantoFocus()")
+            }
+        }
+
+        private func applyPendingRefitIfPossible() {
+            guard pendingRefitOnReady, isReady, isVisible, let webView else { return }
+            pendingRefitOnReady = false
+            webView.evaluateJavaScript("window.kodantoRefitAndFocus && window.kodantoRefitAndFocus()")
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -118,6 +145,7 @@ struct TerminalWebView: NSViewRepresentable {
             case "ready":
                 isReady = true
                 flush()
+                applyPendingRefitIfPossible()
             case "input":
                 if let value = payload["data"] as? String {
                     onInput(value)
@@ -219,6 +247,13 @@ struct TerminalWebView: NSViewRepresentable {
                 if (term) term.focus();
               };
 
+              window.kodantoRefitAndFocus = () => {
+                if (!term) return;
+                if (fit) fit.fit();
+                emitSize();
+                term.focus();
+              };
+
               const boot = () => {
                 if (!window.Terminal || !window.FitAddon || !window.FitAddon.FitAddon) {
                   fallbackNode.style.display = 'block';
@@ -275,5 +310,11 @@ struct TerminalWebView: NSViewRepresentable {
         </body>
         </html>
         """
+    }
+}
+
+enum TerminalWebViewVisibilityTransition {
+    static func shouldRefit(previous: Bool, current: Bool) -> Bool {
+        !previous && current
     }
 }

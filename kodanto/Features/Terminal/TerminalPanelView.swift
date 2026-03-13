@@ -21,26 +21,34 @@ struct TerminalPanelView: View {
     }
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
             if model.isTerminalPanelOpen {
-                VStack(spacing: 0) {
-                    resizeHandle
-                    terminalContent
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: resolvedHeight, alignment: .top)
-                .background(Color(NSColor.textBackgroundColor))
-                .overlay(alignment: .top) {
-                    Divider()
-                }
-                .clipped()
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .onAppear {
-                    model.ensureTerminalConnectedIfNeeded()
-                }
+                resizeHandle
+            }
+
+            terminalContent
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: model.isTerminalPanelOpen ? resolvedHeight : 0, alignment: .top)
+        .background(Color(NSColor.textBackgroundColor))
+        .overlay(alignment: .top) {
+            if model.isTerminalPanelOpen {
+                Divider()
             }
         }
+        .clipped()
+        .allowsHitTesting(model.isTerminalPanelOpen)
         .animation(.easeInOut(duration: 0.18), value: model.isTerminalPanelOpen)
+        .onAppear {
+            if model.isTerminalPanelOpen {
+                model.ensureTerminalConnectedIfNeeded()
+            }
+        }
+        .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
+            if isOpen {
+                model.ensureTerminalConnectedIfNeeded()
+            }
+        }
     }
 
     private var resizeHandle: some View {
@@ -91,6 +99,7 @@ struct TerminalPanelView: View {
             ZStack {
                 TerminalWebView(
                     sessionID: pty.id,
+                    isVisible: model.isTerminalPanelOpen,
                     outputRevision: model.terminalStore.activeOutputRevision,
                     consumeOutput: { model.consumeTerminalOutputChunks() },
                     onInput: { value in
