@@ -134,6 +134,7 @@ final class KodantoAppModelSessionActionsTests: XCTestCase {
             modelSelectionStore: ModelSelectionStore(userDefaults: defaults),
             modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: defaults),
             permissionAutoAcceptStore: PermissionAutoAcceptStore(userDefaults: defaults),
+            terminalLayoutStore: TerminalLayoutStore(userDefaults: defaults),
             projectOrderStore: ProjectOrderStore(userDefaults: defaults),
             clock: TestClock()
         )
@@ -265,6 +266,23 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         sessionsByID[sessionID] = created
         return created
     }
+    func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
+    func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
+    func createPTY(
+        directory: String,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        args: [String]?
+    ) async throws -> OpenCodePTY { fatalError("unused") }
+    func updatePTY(
+        ptyID: String,
+        directory: String,
+        title: String?,
+        rows: Int?,
+        cols: Int?
+    ) async throws -> OpenCodePTY { fatalError("unused") }
+    func removePTY(ptyID: String, directory: String) async throws {}
     func initializeGitRepository(directory: String) async throws -> OpenCodeProject { fatalError("unused") }
     func sendPrompt(
         sessionID: String,

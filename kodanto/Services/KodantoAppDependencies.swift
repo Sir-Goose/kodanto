@@ -21,6 +21,23 @@ protocol OpenCodeAPIService {
         archivedAt: Double?
     ) async throws -> OpenCodeSession
     func initializeGitRepository(directory: String) async throws -> OpenCodeProject
+    func ptySessions(directory: String) async throws -> [OpenCodePTY]
+    func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY
+    func createPTY(
+        directory: String,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        args: [String]?
+    ) async throws -> OpenCodePTY
+    func updatePTY(
+        ptyID: String,
+        directory: String,
+        title: String?,
+        rows: Int?,
+        cols: Int?
+    ) async throws -> OpenCodePTY
+    func removePTY(ptyID: String, directory: String) async throws
     func sendPrompt(
         sessionID: String,
         directory: String,
@@ -64,6 +81,7 @@ struct KodantoAppDependencies {
     let modelSelectionStore: ModelSelectionStoring
     let modelVariantSelectionStore: ModelVariantSelectionStoring
     let permissionAutoAcceptStore: PermissionAutoAcceptStoring
+    let terminalLayoutStore: TerminalLayoutStoring
     let projectOrderStore: ProjectOrderStoring
     let clock: AppClock
 
@@ -76,6 +94,7 @@ struct KodantoAppDependencies {
             modelSelectionStore: ModelSelectionStore(userDefaults: userDefaults),
             modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: userDefaults),
             permissionAutoAcceptStore: PermissionAutoAcceptStore(userDefaults: userDefaults),
+            terminalLayoutStore: TerminalLayoutStore(userDefaults: userDefaults),
             projectOrderStore: ProjectOrderStore(userDefaults: userDefaults),
             clock: SystemAppClock()
         )

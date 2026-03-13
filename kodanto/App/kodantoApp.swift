@@ -35,6 +35,12 @@ struct kodantoApp: App {
         .commands {
             if !isRunningTests {
                 CommandMenu("View") {
+                    Button(appModel.isTerminalPanelOpen ? "Hide Terminal" : "Show Terminal") {
+                        appModel.toggleTerminalPanel()
+                    }
+                    .keyboardShortcut("`", modifiers: [.control])
+                    .disabled(!appModel.canShowTerminal)
+
                     Button("Connections...") {
                         appModel.showingConnectionsManager = true
                     }

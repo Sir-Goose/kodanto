@@ -277,6 +277,21 @@ struct OpenCodeSession: Decodable, Identifiable, Hashable {
     }
 }
 
+struct OpenCodePTY: Decodable, Identifiable, Hashable {
+    enum Status: String, Decodable, Hashable {
+        case running
+        case exited
+    }
+
+    let id: String
+    let title: String
+    let command: String
+    let args: [String]
+    let cwd: String
+    let status: Status
+    let pid: Int
+}
+
 struct OpenCodeTodo: Decodable, Hashable {
     let content: String
     let status: String
@@ -1008,6 +1023,19 @@ enum OpenCodeEvent: Decodable {
         let partID: String
     }
 
+    struct PTYInfoPayload: Decodable {
+        let info: OpenCodePTY
+    }
+
+    struct PTYExitedPayload: Decodable {
+        let id: String
+        let exitCode: Int
+    }
+
+    struct PTYDeletedPayload: Decodable {
+        let id: String
+    }
+
     struct PermissionRepliedPayload: Decodable {
         let sessionID: String
         let requestID: String
@@ -1033,6 +1061,10 @@ enum OpenCodeEvent: Decodable {
     case messagePartUpdated(MessagePartUpdatedPayload)
     case messagePartDelta(MessagePartDeltaPayload)
     case messagePartRemoved(MessagePartRemovedPayload)
+    case ptyCreated(PTYInfoPayload)
+    case ptyUpdated(PTYInfoPayload)
+    case ptyExited(PTYExitedPayload)
+    case ptyDeleted(PTYDeletedPayload)
     case permissionAsked(OpenCodePermissionRequest)
     case permissionReplied(PermissionRepliedPayload)
     case questionAsked(OpenCodeQuestionRequest)
@@ -1078,6 +1110,14 @@ enum OpenCodeEvent: Decodable {
             self = .messagePartDelta(try container.decode(MessagePartDeltaPayload.self, forKey: .properties))
         case "message.part.removed":
             self = .messagePartRemoved(try container.decode(MessagePartRemovedPayload.self, forKey: .properties))
+        case "pty.created":
+            self = .ptyCreated(try container.decode(PTYInfoPayload.self, forKey: .properties))
+        case "pty.updated":
+            self = .ptyUpdated(try container.decode(PTYInfoPayload.self, forKey: .properties))
+        case "pty.exited":
+            self = .ptyExited(try container.decode(PTYExitedPayload.self, forKey: .properties))
+        case "pty.deleted":
+            self = .ptyDeleted(try container.decode(PTYDeletedPayload.self, forKey: .properties))
         case "permission.asked":
             self = .permissionAsked(try container.decode(OpenCodePermissionRequest.self, forKey: .properties))
         case "permission.replied":

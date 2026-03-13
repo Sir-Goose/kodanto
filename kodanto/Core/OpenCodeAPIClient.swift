@@ -112,6 +112,59 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func ptySessions(directory: String) async throws -> [OpenCodePTY] {
+        let request = try ptyListRequest(directory: directory)
+        let data = try await requestData(for: request)
+        return try decoder.decode([OpenCodePTY].self, from: data)
+    }
+
+    func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY {
+        let request = try ptyGetRequest(ptyID: ptyID, directory: directory)
+        let data = try await requestData(for: request)
+        return try decoder.decode(OpenCodePTY.self, from: data)
+    }
+
+    func createPTY(
+        directory: String,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        args: [String]?
+    ) async throws -> OpenCodePTY {
+        let request = try ptyCreateRequest(
+            directory: directory,
+            title: title,
+            cwd: cwd,
+            command: command,
+            args: args
+        )
+        let data = try await requestData(for: request)
+        return try decoder.decode(OpenCodePTY.self, from: data)
+    }
+
+    func updatePTY(
+        ptyID: String,
+        directory: String,
+        title: String?,
+        rows: Int?,
+        cols: Int?
+    ) async throws -> OpenCodePTY {
+        let request = try ptyUpdateRequest(
+            ptyID: ptyID,
+            directory: directory,
+            title: title,
+            rows: rows,
+            cols: cols
+        )
+        let data = try await requestData(for: request)
+        return try decoder.decode(OpenCodePTY.self, from: data)
+    }
+
+    func removePTY(ptyID: String, directory: String) async throws {
+        let request = try ptyDeleteRequest(ptyID: ptyID, directory: directory)
+        _ = try await requestData(for: request)
+    }
+
     func sendPrompt(
         sessionID: String,
         directory: String,
@@ -150,6 +203,116 @@ struct OpenCodeAPIClient {
         _ = try await requestNoContent(path: "/question/\(requestID)/reject", method: "POST", directory: directory)
     }
 
+    func ptyListRequest(directory: String) throws -> URLRequest {
+        try makeRequest(path: "/pty", method: "GET", queryItems: [URLQueryItem(name: "directory", value: directory)])
+    }
+
+    func ptyCreateRequest(
+        directory: String,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        args: [String]?
+    ) throws -> URLRequest {
+        struct Body: Encodable {
+            let command: String?
+            let args: [String]?
+            let cwd: String?
+            let title: String?
+        }
+
+        return try makeRequest(
+            path: "/pty",
+            method: "POST",
+            queryItems: [URLQueryItem(name: "directory", value: directory)],
+            body: AnyEncodable(Body(command: command, args: args, cwd: cwd, title: title))
+        )
+    }
+
+    func ptyGetRequest(ptyID: String, directory: String) throws -> URLRequest {
+        try makeRequest(
+            path: "/pty/\(ptyID)",
+            method: "GET",
+            queryItems: [URLQueryItem(name: "directory", value: directory)]
+        )
+    }
+
+    func ptyUpdateRequest(
+        ptyID: String,
+        directory: String,
+        title: String?,
+        rows: Int?,
+        cols: Int?
+    ) throws -> URLRequest {
+        struct Body: Encodable {
+            struct Size: Encodable {
+                let rows: Int
+                let cols: Int
+            }
+
+            let title: String?
+            let size: Size?
+        }
+
+        let resolvedSize: Body.Size?
+        if let rows, let cols {
+            resolvedSize = Body.Size(rows: rows, cols: cols)
+        } else {
+            resolvedSize = nil
+        }
+
+        return try makeRequest(
+            path: "/pty/\(ptyID)",
+            method: "PUT",
+            queryItems: [URLQueryItem(name: "directory", value: directory)],
+            body: AnyEncodable(Body(title: title, size: resolvedSize))
+        )
+    }
+
+    func ptyDeleteRequest(ptyID: String, directory: String) throws -> URLRequest {
+        try makeRequest(
+            path: "/pty/\(ptyID)",
+            method: "DELETE",
+            queryItems: [URLQueryItem(name: "directory", value: directory)]
+        )
+    }
+
+    func ptyConnectRequest(ptyID: String, directory: String, cursor: Int?) throws -> URLRequest {
+        var queryItems = [URLQueryItem(name: "directory", value: directory)]
+        if let cursor {
+            queryItems.append(URLQueryItem(name: "cursor", value: String(cursor)))
+        }
+
+        var request = try makeRequest(
+            path: "/pty/\(ptyID)/connect",
+            method: "GET",
+            queryItems: queryItems
+        )
+
+        guard let originalURL = request.url,
+              var components = URLComponents(url: originalURL, resolvingAgainstBaseURL: false)
+        else {
+            return request
+        }
+
+        switch components.scheme?.lowercased() {
+        case "https":
+            components.scheme = "wss"
+        default:
+            components.scheme = "ws"
+        }
+
+        // Keep URL credentials for websocket servers that ignore Authorization header.
+        components.user = profile.username
+        components.password = profile.password
+
+        if let wsURL = components.url {
+            request.url = wsURL
+        }
+
+        return request
+    }
+
     private func request<T: Decodable>(
         path: String,
         method: String = "GET",
@@ -179,6 +342,10 @@ struct OpenCodeAPIClient {
         body: AnyEncodable?
     ) async throws -> Data {
         let request = try makeRequest(path: path, method: method, directory: directory, queryItems: queryItems, body: body)
+        return try await requestData(for: request)
+    }
+
+    private func requestData(for request: URLRequest) async throws -> Data {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -209,9 +376,9 @@ struct OpenCodeAPIClient {
     private func makeRequest(
         path: String,
         method: String,
-        directory: String?,
-        queryItems: [URLQueryItem],
-        body: AnyEncodable?
+        directory: String? = nil,
+        queryItems: [URLQueryItem] = [],
+        body: AnyEncodable? = nil
     ) throws -> URLRequest {
         guard let baseURL = profile.resolvedURL else {
             throw OpenCodeAPIError.invalidBaseURL(profile.baseURL)

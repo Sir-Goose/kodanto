@@ -37,6 +37,28 @@ final class OpenCodeSSEClientEventParserTests: XCTestCase {
         XCTAssertThrowsError(try parser.finish())
     }
 
+    func testPushParsesPTYEvents() throws {
+        var parser = OpenCodeSSEClient.EventParser()
+
+        let createdEvents = try parser.push(line: #"data: {"directory":"/tmp/project","payload":{"type":"pty.created","properties":{"info":{"id":"pty-1","title":"Terminal","command":"zsh","args":[],"cwd":"/tmp/project","status":"running","pid":123}}}}"#)
+        XCTAssertEqual(createdEvents.count, 1)
+        guard case .ptyCreated(let payload) = createdEvents[0].payload else {
+            XCTFail("Expected pty.created payload")
+            return
+        }
+        XCTAssertEqual(payload.info.id, "pty-1")
+        XCTAssertEqual(payload.info.status, .running)
+
+        let exitedEvents = try parser.push(line: #"data: {"directory":"/tmp/project","payload":{"type":"pty.exited","properties":{"id":"pty-1","exitCode":0}}}"#)
+        XCTAssertEqual(exitedEvents.count, 1)
+        guard case .ptyExited(let exitedPayload) = exitedEvents[0].payload else {
+            XCTFail("Expected pty.exited payload")
+            return
+        }
+        XCTAssertEqual(exitedPayload.id, "pty-1")
+        XCTAssertEqual(exitedPayload.exitCode, 0)
+    }
+
     private func assertServerConnected(_ event: OpenCodeGlobalEvent, directory: String?) {
         XCTAssertEqual(event.directory, directory)
         guard case .serverConnected = event.payload else {

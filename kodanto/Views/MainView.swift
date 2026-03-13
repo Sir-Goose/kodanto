@@ -15,6 +15,7 @@ struct MainView: View {
                 splitViewVisibility: splitViewVisibility
             )
         }
+        .navigationSplitViewStyle(.balanced)
         .sheet(isPresented: $model.showingDiagnostics) {
             DiagnosticsSheet(model: model)
         }
@@ -31,7 +32,7 @@ struct MainView: View {
         }
         .background {
             ZStack {
-                WindowTitlebarAccessory(content: connectionStatusButton)
+                WindowTitlebarAccessory(content: titlebarControls)
                 WindowDoubleClickBehavior()
             }
             .frame(width: 0, height: 0)
@@ -44,6 +45,48 @@ struct MainView: View {
         .onAppear {
             model.sanitizeProjects()
         }
+    }
+
+    private var titlebarControls: some View {
+        HStack(spacing: 8) {
+            terminalToggleButton
+            connectionStatusButton
+        }
+    }
+
+    private var terminalToggleButton: some View {
+        Button {
+            model.toggleTerminalPanel()
+        } label: {
+            Image(systemName: model.isTerminalPanelOpen ? "rectangle.bottomthird.inset.filled" : "rectangle.bottomthird.inset")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(toggleButtonForeground)
+                .frame(width: 30, height: 28)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(
+                            model.isTerminalPanelOpen
+                                ? Color.accentColor.opacity(0.28)
+                                : Color.secondary.opacity(0.18),
+                            lineWidth: 1
+                        )
+                }
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canShowTerminal)
+        .opacity(model.canShowTerminal ? 1 : 0.55)
+        .help("Toggle Terminal")
+    }
+
+    private var toggleButtonForeground: Color {
+        guard model.canShowTerminal else {
+            return .secondary
+        }
+        return model.isTerminalPanelOpen ? .accentColor : .primary
     }
 
     private var connectionStatusButton: some View {

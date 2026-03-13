@@ -83,6 +83,17 @@ struct MainSessionDetailPane: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .ignoresSafeArea(edges: .top)
+        .onAppear {
+            model.ensureTerminalConnectedIfNeeded()
+        }
+        .onChange(of: selectedProject?.worktree) { _, _ in
+            model.ensureTerminalConnectedIfNeeded()
+        }
+        .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
+            if isOpen {
+                model.ensureTerminalConnectedIfNeeded()
+            }
+        }
     }
 
     @ViewBuilder
@@ -90,16 +101,28 @@ struct MainSessionDetailPane: View {
         let composerMaxHeight = max(promptMinimumHeight, availableHeight * 0.3)
 
         if let session = selectedSession {
-            selectedSessionView(session: session, composerMaxHeight: composerMaxHeight)
+            selectedSessionView(
+                session: session,
+                composerMaxHeight: composerMaxHeight,
+                availableHeight: availableHeight
+            )
         } else if let project = selectedProject {
-            newSessionView(project: project, composerMaxHeight: composerMaxHeight)
+            newSessionView(
+                project: project,
+                composerMaxHeight: composerMaxHeight,
+                availableHeight: availableHeight
+            )
         } else {
             ContentUnavailableView("Select a session", systemImage: "bubble.left.and.text.bubble.right")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    private func selectedSessionView(session: OpenCodeSession, composerMaxHeight: CGFloat) -> some View {
+    private func selectedSessionView(
+        session: OpenCodeSession,
+        composerMaxHeight: CGFloat,
+        availableHeight: CGFloat
+    ) -> some View {
         VStack(spacing: 0) {
             header(for: session)
             Divider()
@@ -111,21 +134,33 @@ struct MainSessionDetailPane: View {
                     .frame(maxWidth: Self.composerMaxWidth)
                     .padding(.horizontal, Self.composerOuterPadding)
                     .padding(.bottom, Self.composerOuterPadding)
+
+                TerminalPanelView(model: model, availableHeight: availableHeight)
             }
         }
+        .clipped()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func newSessionView(project: OpenCodeProject, composerMaxHeight: CGFloat) -> some View {
+    private func newSessionView(
+        project: OpenCodeProject,
+        composerMaxHeight: CGFloat,
+        availableHeight: CGFloat
+    ) -> some View {
         VStack(spacing: 0) {
             newSessionHeader(for: project)
             Divider()
-            Spacer(minLength: 0)
-            composer(maxHeight: composerMaxHeight)
-                .frame(maxWidth: Self.composerMaxWidth)
-                .padding(.horizontal, Self.composerOuterPadding)
-                .padding(.bottom, Self.composerOuterPadding)
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                composer(maxHeight: composerMaxHeight)
+                    .frame(maxWidth: Self.composerMaxWidth)
+                    .padding(.horizontal, Self.composerOuterPadding)
+                    .padding(.bottom, Self.composerOuterPadding)
+
+                TerminalPanelView(model: model, availableHeight: availableHeight)
+            }
         }
+        .clipped()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 

@@ -39,12 +39,15 @@ final class KodantoAppModel {
     var showingConnectionSheet = false
     var showingConnectionsManager = false
     var showingDiagnostics = false
+    var isTerminalPanelOpen = false
+    var terminalPanelHeight: Double = TerminalLayoutState.default.height
 
     let workspaceStore: WorkspaceStore
     let sessionDetailStore: SessionDetailStore
     let sessionRequestStore: SessionRequestStore
     let composerStore: ComposerStore
     let liveSyncCoordinator: LiveSyncCoordinator
+    let terminalStore: TerminalStore
 
     private let dependencies: KodantoAppDependencies
     private var connectTask: Task<Void, Never>?
@@ -67,6 +70,7 @@ final class KodantoAppModel {
             sseStreamProvider: dependencies.sseStreamProvider,
             clock: dependencies.clock
         )
+        terminalStore = TerminalStore()
 
         profiles = dependencies.profileStore.load()
         if profiles.isEmpty {
@@ -80,6 +84,10 @@ final class KodantoAppModel {
 
         composerStore.updateSelectedProfile(selectedProfileID)
         syncSelectionContext(resetSessionState: true)
+
+        let terminalLayout = dependencies.terminalLayoutStore.load()
+        isTerminalPanelOpen = terminalLayout.isOpen
+        terminalPanelHeight = terminalLayout.height
 
         dependencies.sidecar.setOutputHandler { [weak self] line in
             Task { @MainActor in
@@ -217,6 +225,10 @@ final class KodantoAppModel {
         selectedProject != nil && selectedProfile != nil && !draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    var canShowTerminal: Bool {
+        selectedProject != nil && selectedProfile != nil
+    }
+
     var canRefresh: Bool {
         connectionState.isConnected
     }
@@ -228,6 +240,124 @@ final class KodantoAppModel {
         case .connecting, .connected:
             return false
         }
+    }
+
+    func toggleTerminalPanel() {
+        setTerminalPanelOpen(!isTerminalPanelOpen)
+    }
+
+    func setTerminalPanelOpen(_ isOpen: Bool) {
+        guard isTerminalPanelOpen != isOpen else { return }
+        isTerminalPanelOpen = isOpen
+        persistTerminalLayout()
+        if isOpen {
+            ensureTerminalConnectedIfNeeded()
+        }
+    }
+
+    func setTerminalPanelHeight(_ value: Double) {
+        guard value.isFinite else { return }
+        let clamped = max(140, value)
+        guard terminalPanelHeight != clamped else { return }
+        terminalPanelHeight = clamped
+        persistTerminalLayout()
+    }
+
+    func consumeTerminalOutputChunks() -> [String] {
+        terminalStore.consumeActiveOutputChunks()
+    }
+
+    func sendTerminalInput(_ input: String) {
+        Task {
+            await terminalStore.sendInputToActive(input)
+        }
+    }
+
+    func retryTerminalConnection() {
+        guard isTerminalPanelOpen,
+              let profile = selectedProfile,
+              let directory = selectedProject?.worktree
+        else {
+            return
+        }
+
+        let launchConfiguration = terminalLaunchConfiguration(profile: profile, directory: directory)
+        let client = dependencies.apiFactory.makeService(profile: profile)
+        Task {
+            await terminalStore.retryActiveConnection(
+                launchConfiguration: launchConfiguration,
+                client: client
+            ) { ptyID, directory, cursor in
+                try OpenCodeAPIClient(profile: profile).ptyConnectRequest(
+                    ptyID: ptyID,
+                    directory: directory,
+                    cursor: cursor
+                )
+            }
+        }
+    }
+
+    func ensureTerminalConnectedIfNeeded() {
+        guard isTerminalPanelOpen,
+              let profile = selectedProfile,
+              let directory = selectedProject?.worktree
+        else {
+            return
+        }
+
+        let launchConfiguration = terminalLaunchConfiguration(profile: profile, directory: directory)
+        let client = dependencies.apiFactory.makeService(profile: profile)
+        Task {
+            await terminalStore.ensureConnected(
+                directory: directory,
+                launchConfiguration: launchConfiguration,
+                client: client
+            ) { ptyID, directory, cursor in
+                try OpenCodeAPIClient(profile: profile).ptyConnectRequest(
+                    ptyID: ptyID,
+                    directory: directory,
+                    cursor: cursor
+                )
+            }
+        }
+    }
+
+    func updateTerminalSize(rows: Int, cols: Int) {
+        guard let profile = selectedProfile else { return }
+        let client = dependencies.apiFactory.makeService(profile: profile)
+        Task {
+            await terminalStore.updateActiveSize(rows: rows, cols: cols, client: client)
+        }
+    }
+
+    private func terminalLaunchConfiguration(profile: ServerProfile, directory: String) -> TerminalStore.LaunchConfiguration {
+        switch profile.kind {
+        case .localSidecar:
+            let shell = resolvedLocalZshPath()
+            return TerminalStore.LaunchConfiguration(
+                title: "Terminal",
+                cwd: directory,
+                command: shell,
+                args: ["-l"],
+                enforceShell: true
+            )
+        case .remote:
+            return TerminalStore.LaunchConfiguration(
+                title: "Terminal",
+                cwd: directory,
+                command: nil,
+                args: nil,
+                enforceShell: false
+            )
+        }
+    }
+
+    private func resolvedLocalZshPath() -> String {
+        let shell = ProcessInfo.processInfo.environment["SHELL"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let shell, !shell.isEmpty, URL(fileURLWithPath: shell).lastPathComponent.lowercased() == "zsh" {
+            return shell
+        }
+        return "/bin/zsh"
     }
 
     var isLiveSyncActive: Bool {
@@ -267,6 +397,9 @@ final class KodantoAppModel {
         guard forceReset || selectedProfileID != profileID else { return }
         connectTask?.cancel()
         stopLiveSync()
+        Task {
+            await terminalStore.disconnectAll()
+        }
 
         selectedProfileID = profileID
         composerStore.updateSelectedProfile(profileID)
@@ -813,6 +946,8 @@ final class KodantoAppModel {
     }
 
     private func applyGlobalEvent(_ event: OpenCodeGlobalEvent) {
+        terminalStore.handleGlobalEvent(event)
+
         let effects = GlobalEventRouter.apply(
             event,
             selectedProfileID: selectedProfileID,
@@ -862,6 +997,8 @@ final class KodantoAppModel {
             sessionRequestStore.clearRequests()
         }
         sessionRequestStore.updateSelection(sessionID: selectedSessionID, directory: selectedProject?.worktree)
+        terminalStore.setActiveDirectory(selectedProject?.worktree)
+        ensureTerminalConnectedIfNeeded()
     }
 
     private func waitForServer(profile: ServerProfile) async throws {
@@ -880,6 +1017,12 @@ final class KodantoAppModel {
         if sidecarLog.count > 12000 {
             sidecarLog = String(sidecarLog.suffix(12000))
         }
+    }
+
+    private func persistTerminalLayout() {
+        dependencies.terminalLayoutStore.save(
+            .init(isOpen: isTerminalPanelOpen, height: terminalPanelHeight)
+        )
     }
 
     static func makeLocalProfile() -> ServerProfile {

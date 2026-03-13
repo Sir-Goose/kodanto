@@ -411,6 +411,7 @@ final class SessionUnreadModelTests: XCTestCase {
             modelSelectionStore: ModelSelectionStore(userDefaults: defaults),
             modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: defaults),
             permissionAutoAcceptStore: PermissionAutoAcceptStore(userDefaults: defaults),
+            terminalLayoutStore: TerminalLayoutStore(userDefaults: defaults),
             projectOrderStore: ProjectOrderStore(userDefaults: defaults),
             clock: SessionUnreadTestClock()
         )
@@ -541,6 +542,23 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     func questions(directory: String) async throws -> [OpenCodeQuestionRequest] { fatalError("unused") }
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
+    func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
+    func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
+    func createPTY(
+        directory: String,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        args: [String]?
+    ) async throws -> OpenCodePTY { fatalError("unused") }
+    func updatePTY(
+        ptyID: String,
+        directory: String,
+        title: String?,
+        rows: Int?,
+        cols: Int?
+    ) async throws -> OpenCodePTY { fatalError("unused") }
+    func removePTY(ptyID: String, directory: String) async throws {}
     func updateSession(
         sessionID: String,
         directory: String,
@@ -579,6 +597,23 @@ private final class SessionUnreadMockAPIService: OpenCodeAPIService {
     func questions(directory: String) async throws -> [OpenCodeQuestionRequest] { fatalError("unused") }
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
+    func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
+    func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
+    func createPTY(
+        directory: String,
+        title: String?,
+        cwd: String?,
+        command: String?,
+        args: [String]?
+    ) async throws -> OpenCodePTY { fatalError("unused") }
+    func updatePTY(
+        ptyID: String,
+        directory: String,
+        title: String?,
+        rows: Int?,
+        cols: Int?
+    ) async throws -> OpenCodePTY { fatalError("unused") }
+    func removePTY(ptyID: String, directory: String) async throws {}
     func updateSession(
         sessionID: String,
         directory: String,
