@@ -6,6 +6,7 @@ struct MainSidebarPane: View {
     @Bindable var model: KodantoAppModel
 
     @State private var expandedProjectIDs: Set<OpenCodeProject.ID> = []
+    @State private var isShowingAllProjects = false
     @State private var projectsShowingAllSessions: Set<OpenCodeProject.ID> = []
     @State private var projectHeaderFrames: [OpenCodeProject.ID: CGRect] = [:]
     @State private var draggedProjectID: OpenCodeProject.ID?
@@ -18,12 +19,30 @@ struct MainSidebarPane: View {
     @FocusState private var isSidebarFocused: Bool
 
     private let projectDropCoordinateSpace = "project-drop-coordinate-space"
+    private static let defaultVisibleProjectCount = 25
     private static let defaultVisibleSessionCount = 10
+
+    private var projectPagination: SidebarProjectPagination.Projection {
+        let selectedProjectIndex = model.selectedProjectID.flatMap { selectedProjectID in
+            model.projects.firstIndex { $0.id == selectedProjectID }
+        }
+
+        return SidebarProjectPagination.projection(
+            totalProjectCount: model.projects.count,
+            selectedProjectIndex: selectedProjectIndex,
+            isShowingAll: isShowingAllProjects,
+            defaultVisibleCount: Self.defaultVisibleProjectCount
+        )
+    }
+
+    private var visibleProjects: [OpenCodeProject] {
+        Array(model.projects.prefix(projectPagination.visibleCount))
+    }
 
     private var sidebarRenderItems: [SidebarRenderItem] {
         var items: [SidebarRenderItem] = []
 
-        for project in model.projects {
+        for project in visibleProjects {
             let isExpanded = expandedProjectIDs.contains(project.id)
             let sessions = model.sessions(for: project)
             let isLoadingSessions = model.isLoadingSessions(for: project)
@@ -86,6 +105,12 @@ struct MainSidebarPane: View {
             }
         }
 
+        if projectPagination.showsShowMore {
+            items.append(.projectListPaginationControl(control: .showMore(hiddenCount: projectPagination.hiddenCount)))
+        } else if projectPagination.showsShowLess {
+            items.append(.projectListPaginationControl(control: .showLess))
+        }
+
         return items
     }
 
@@ -112,7 +137,7 @@ struct MainSidebarPane: View {
             .contentShape(Rectangle())
             .onDrop(of: [UTType.plainText], delegate: ProjectSidebarContainerDropDelegate(
                 model: model,
-                projectOrder: model.projects.map(\.id),
+                projectOrder: visibleProjects.map(\.id),
                 projectHeaderFrames: projectHeaderFrames,
                 draggedProjectID: $draggedProjectID,
                 dropTarget: $projectDropTarget
@@ -159,7 +184,12 @@ struct MainSidebarPane: View {
                 projectsShowingAllSessions,
                 validProjectIDs: validProjectIDs
             )
+            isShowingAllProjects = SidebarProjectPaginationStateResolver.resetShowAllStateAfterProjectListChange()
             projectHeaderFrames = projectHeaderFrames.filter { validProjectIDs.contains($0.key) }
+        }
+        .onChange(of: model.selectedProfileID) { _, _ in
+            isShowingAllProjects = SidebarProjectPaginationStateResolver.resetShowAllStateAfterProjectListChange()
+            projectsShowingAllSessions = []
         }
         .onAppear {
             draggedProjectID = nil
@@ -228,6 +258,8 @@ struct MainSidebarPane: View {
         switch item {
         case let .projectHeader(project, isExpanded, isLoading):
             projectHeaderRow(project: project, isExpanded: isExpanded, isLoading: isLoading)
+        case let .projectListPaginationControl(control):
+            projectListPaginationControlRow(control: control)
         case .projectLoading:
             projectLoadingRow
         case .projectEmpty:
@@ -305,6 +337,27 @@ struct MainSidebarPane: View {
             .foregroundStyle(.secondary)
             .padding(.leading, 28)
             .padding(.vertical, 4)
+    }
+
+    private func projectListPaginationControlRow(
+        control: SidebarProjectPaginationControl
+    ) -> some View {
+        Button {
+            handleProjectPaginationControl(control)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: control.symbolName)
+                    .font(.caption.weight(.semibold))
+                Text(control.title)
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.leading, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func sessionPaginationControlRow(
@@ -510,6 +563,17 @@ struct MainSidebarPane: View {
         }
     }
 
+    private func handleProjectPaginationControl(
+        _ control: SidebarProjectPaginationControl
+    ) {
+        switch control {
+        case .showMore:
+            isShowingAllProjects = true
+        case .showLess:
+            isShowingAllProjects = false
+        }
+    }
+
     private func handleSessionPaginationControl(
         _ control: SidebarSessionPaginationControl,
         for projectID: OpenCodeProject.ID
@@ -520,6 +584,60 @@ struct MainSidebarPane: View {
         case .showLess:
             projectsShowingAllSessions.remove(projectID)
         }
+    }
+}
+
+enum SidebarProjectPagination {
+    struct Projection: Equatable {
+        let visibleCount: Int
+        let hiddenCount: Int
+        let showsShowMore: Bool
+        let showsShowLess: Bool
+    }
+
+    static func projection(
+        totalProjectCount: Int,
+        selectedProjectIndex: Int?,
+        isShowingAll: Bool,
+        defaultVisibleCount: Int
+    ) -> Projection {
+        let totalProjectCount = max(0, totalProjectCount)
+        let defaultVisibleCount = max(1, defaultVisibleCount)
+
+        guard totalProjectCount > 0 else {
+            return Projection(visibleCount: 0, hiddenCount: 0, showsShowMore: false, showsShowLess: false)
+        }
+
+        if isShowingAll {
+            return Projection(
+                visibleCount: totalProjectCount,
+                hiddenCount: 0,
+                showsShowMore: false,
+                showsShowLess: totalProjectCount > defaultVisibleCount
+            )
+        }
+
+        var visibleCount = min(defaultVisibleCount, totalProjectCount)
+        if let selectedProjectIndex,
+           selectedProjectIndex >= 0,
+           selectedProjectIndex < totalProjectCount,
+           selectedProjectIndex >= visibleCount {
+            visibleCount = selectedProjectIndex + 1
+        }
+
+        let hiddenCount = max(0, totalProjectCount - visibleCount)
+        return Projection(
+            visibleCount: visibleCount,
+            hiddenCount: hiddenCount,
+            showsShowMore: hiddenCount > 0,
+            showsShowLess: false
+        )
+    }
+}
+
+enum SidebarProjectPaginationStateResolver {
+    static func resetShowAllStateAfterProjectListChange() -> Bool {
+        false
     }
 }
 
@@ -611,8 +729,32 @@ private enum SidebarSessionPaginationControl: Equatable {
     }
 }
 
+private enum SidebarProjectPaginationControl: Equatable {
+    case showMore(hiddenCount: Int)
+    case showLess
+
+    var title: String {
+        switch self {
+        case let .showMore(hiddenCount):
+            return "Show \(hiddenCount) more"
+        case .showLess:
+            return "Show less"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .showMore:
+            return "chevron.down"
+        case .showLess:
+            return "chevron.up"
+        }
+    }
+}
+
 private enum SidebarRenderItem: Identifiable {
     case projectHeader(project: OpenCodeProject, isExpanded: Bool, isLoading: Bool)
+    case projectListPaginationControl(control: SidebarProjectPaginationControl)
     case projectLoading(projectID: OpenCodeProject.ID)
     case projectEmpty(projectID: OpenCodeProject.ID)
     case sessionPaginationControl(projectID: OpenCodeProject.ID, control: SidebarSessionPaginationControl)
@@ -627,6 +769,8 @@ private enum SidebarRenderItem: Identifiable {
         switch self {
         case let .projectHeader(project, _, _):
             return "project-header-\(project.id)"
+        case .projectListPaginationControl:
+            return "project-list-pagination-control"
         case let .projectLoading(projectID):
             return "project-loading-\(projectID)"
         case let .projectEmpty(projectID):
@@ -644,7 +788,7 @@ private enum SidebarRenderItem: Identifiable {
             return .project(project.id)
         case let .session(project, session, _, _):
             return .session(projectID: project.id, sessionID: session.id)
-        case .projectLoading, .projectEmpty, .sessionPaginationControl:
+        case .projectListPaginationControl, .projectLoading, .projectEmpty, .sessionPaginationControl:
             return nil
         }
     }

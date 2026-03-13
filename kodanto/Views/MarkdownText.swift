@@ -6,13 +6,7 @@ struct MarkdownText: View, Equatable {
 
     var body: some View {
         let blocks = MessageMarkdownRenderer.parseBlocks(text)
-
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                MarkdownBlockView(block: block)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        MarkdownBlocksStack(blocks: blocks, spacing: 12)
     }
 }
 
@@ -25,18 +19,25 @@ enum MessageMarkdownRenderer {
         }
     }
 
-    enum Block: Equatable {
+    indirect enum Block: Equatable {
         case paragraph(AttributedString)
         case heading(level: Int, text: AttributedString)
         case horizontalRule
         case list(items: [ListItem])
+        case blockquote([Block])
         case codeBlock(language: String?, code: String)
         case table(TableData)
     }
 
     struct ListItem: Equatable {
         let marker: String
-        let content: AttributedString
+        let task: TaskState?
+        let blocks: [Block]
+    }
+
+    enum TaskState: Equatable {
+        case unchecked
+        case checked
     }
 
     enum TableColumnAlignment: Equatable {
@@ -88,115 +89,7 @@ enum MessageMarkdownRenderer {
             .replacingOccurrences(of: "\r", with: "\n")
         let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
 
-        var blocks: [Block] = []
-        var paragraphLines: [String] = []
-        var currentListKind: PendingListKind?
-        var pendingListItems: [PendingListItem] = []
-        var pendingCodeBlock: PendingCodeBlock?
-
-        func flushParagraph() {
-            guard !paragraphLines.isEmpty else { return }
-            let paragraph = paragraphLines.joined(separator: "\n")
-            if !paragraph.isEmpty {
-                blocks.append(.paragraph(render(paragraph)))
-            }
-            paragraphLines.removeAll(keepingCapacity: true)
-        }
-
-        func flushList() {
-            guard !pendingListItems.isEmpty else { return }
-            blocks.append(.list(items: pendingListItems.map { item in
-                ListItem(marker: item.marker, content: render(item.lines.joined(separator: "\n")))
-            }))
-            currentListKind = nil
-            pendingListItems.removeAll(keepingCapacity: true)
-        }
-
-        var index = 0
-        while index < lines.count {
-            let line = lines[index]
-
-            if var codeBlock = pendingCodeBlock {
-                if isFenceDelimiter(line) {
-                    blocks.append(.codeBlock(language: codeBlock.language, code: codeBlock.lines.joined(separator: "\n")))
-                    pendingCodeBlock = nil
-                } else {
-                    codeBlock.lines.append(line)
-                    pendingCodeBlock = codeBlock
-                }
-                index += 1
-                continue
-            }
-
-            if let codeBlock = openingCodeBlock(from: line) {
-                flushParagraph()
-                flushList()
-                pendingCodeBlock = codeBlock
-                index += 1
-                continue
-            }
-
-            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                flushParagraph()
-                flushList()
-                index += 1
-                continue
-            }
-
-            if let table = parseTable(at: index, lines: lines) {
-                flushParagraph()
-                flushList()
-                blocks.append(.table(table.data))
-                index += table.linesConsumed
-                continue
-            }
-
-            if let heading = parseHeading(from: line) {
-                flushParagraph()
-                flushList()
-                blocks.append(.heading(level: heading.level, text: render(heading.text)))
-                index += 1
-                continue
-            }
-
-            if isHorizontalRule(line) {
-                flushParagraph()
-                flushList()
-                blocks.append(.horizontalRule)
-                index += 1
-                continue
-            }
-
-            if let listItem = parseListItem(from: line) {
-                flushParagraph()
-                if let currentListKind, currentListKind != listItem.kind {
-                    flushList()
-                }
-                currentListKind = listItem.kind
-                pendingListItems.append(PendingListItem(marker: listItem.marker, lines: [listItem.content]))
-                index += 1
-                continue
-            }
-
-            if !pendingListItems.isEmpty, isListContinuation(line) {
-                var item = pendingListItems.removeLast()
-                item.lines.append(line.trimmingCharacters(in: .whitespaces))
-                pendingListItems.append(item)
-                index += 1
-                continue
-            }
-
-            flushList()
-            paragraphLines.append(line)
-            index += 1
-        }
-
-        if let codeBlock = pendingCodeBlock {
-            blocks.append(.codeBlock(language: codeBlock.language, code: codeBlock.lines.joined(separator: "\n")))
-        }
-
-        flushParagraph()
-        flushList()
+        let blocks = parseBlocks(from: lines)
 
         if blocks.isEmpty, !text.isEmpty {
             return [.paragraph(AttributedString(text))]
@@ -210,14 +103,33 @@ enum MessageMarkdownRenderer {
         case ordered
     }
 
-    private struct PendingListItem {
+    private struct ParsedListItem {
+        let kind: PendingListKind
         let marker: String
-        var lines: [String]
+        let task: TaskState?
+        let content: String
+        let indent: Int
     }
 
-    private struct PendingCodeBlock {
+    private struct ParsedList {
+        let items: [ListItem]
+        let linesConsumed: Int
+    }
+
+    private struct ParsedBlockquote {
+        let blocks: [Block]
+        let linesConsumed: Int
+    }
+
+    private struct PendingCodeFence {
+        let marker: Character
+        let length: Int
         let language: String?
-        var lines: [String]
+    }
+
+    private struct ParsedIndentedCodeBlock {
+        let code: String
+        let linesConsumed: Int
     }
 
     private struct Heading {
@@ -225,10 +137,9 @@ enum MessageMarkdownRenderer {
         let text: String
     }
 
-    private struct ParsedListItem {
-        let kind: PendingListKind
-        let marker: String
-        let content: String
+    private struct SetextHeading {
+        let level: Int
+        let text: String
     }
 
     private struct ParsedTable {
@@ -236,21 +147,140 @@ enum MessageMarkdownRenderer {
         let linesConsumed: Int
     }
 
-    private static func openingCodeBlock(from line: String) -> PendingCodeBlock? {
-        guard isFenceDelimiter(line) else { return nil }
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        let language = trimmed
-            .dropFirst(3)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: " ")
-            .first
-            .map(String.init)
+    private static func parseBlocks(from lines: [String]) -> [Block] {
+        var blocks: [Block] = []
+        var paragraphLines: [String] = []
 
-        return PendingCodeBlock(language: language, lines: [])
+        func flushParagraph() {
+            guard !paragraphLines.isEmpty else { return }
+            let paragraph = paragraphLines.joined(separator: "\n")
+            if !paragraph.isEmpty {
+                blocks.append(.paragraph(render(paragraph)))
+            }
+            paragraphLines.removeAll(keepingCapacity: true)
+        }
+
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
+
+            if let openingFence = openingCodeFence(from: line) {
+                flushParagraph()
+
+                var codeLines: [String] = []
+                var fenceIndex = index + 1
+                var didCloseFence = false
+
+                while fenceIndex < lines.count {
+                    if isClosingCodeFence(lines[fenceIndex], matching: openingFence) {
+                        didCloseFence = true
+                        break
+                    }
+                    codeLines.append(lines[fenceIndex])
+                    fenceIndex += 1
+                }
+
+                blocks.append(.codeBlock(language: openingFence.language, code: codeLines.joined(separator: "\n")))
+                index = didCloseFence ? (fenceIndex + 1) : lines.count
+                continue
+            }
+
+            if let quote = parseBlockquote(at: index, lines: lines) {
+                flushParagraph()
+                blocks.append(.blockquote(quote.blocks))
+                index += quote.linesConsumed
+                continue
+            }
+
+            if let table = parseTable(at: index, lines: lines) {
+                flushParagraph()
+                blocks.append(.table(table.data))
+                index += table.linesConsumed
+                continue
+            }
+
+            if let setext = parseSetextHeading(at: index, lines: lines) {
+                flushParagraph()
+                blocks.append(.heading(level: setext.level, text: render(setext.text)))
+                index += 2
+                continue
+            }
+
+            if let heading = parseHeading(from: line) {
+                flushParagraph()
+                blocks.append(.heading(level: heading.level, text: render(heading.text)))
+                index += 1
+                continue
+            }
+
+            if isHorizontalRule(line) {
+                flushParagraph()
+                blocks.append(.horizontalRule)
+                index += 1
+                continue
+            }
+
+            if let list = parseList(at: index, lines: lines) {
+                flushParagraph()
+                blocks.append(.list(items: list.items))
+                index += list.linesConsumed
+                continue
+            }
+
+            if let indentedCode = parseIndentedCodeBlock(at: index, lines: lines) {
+                flushParagraph()
+                blocks.append(.codeBlock(language: nil, code: indentedCode.code))
+                index += indentedCode.linesConsumed
+                continue
+            }
+
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                flushParagraph()
+                index += 1
+                continue
+            }
+
+            paragraphLines.append(line)
+            index += 1
+        }
+
+        flushParagraph()
+        return blocks
     }
 
-    private static func isFenceDelimiter(_ line: String) -> Bool {
-        line.trimmingCharacters(in: .whitespaces).hasPrefix("```")
+    private static func parseSetextHeading(at startIndex: Int, lines: [String]) -> SetextHeading? {
+        guard startIndex + 1 < lines.count else { return nil }
+
+        let titleLine = lines[startIndex]
+        let underlineLine = lines[startIndex + 1]
+
+        let titleTrimmed = titleLine.trimmingCharacters(in: .whitespaces)
+        guard !titleTrimmed.isEmpty else { return nil }
+        guard countLeadingIndent(titleLine) < 4 else { return nil }
+        guard parseListItem(from: titleLine) == nil else { return nil }
+        guard parseHeading(from: titleLine) == nil else { return nil }
+        guard openingCodeFence(from: titleLine) == nil else { return nil }
+        guard !isBlockquoteLine(titleLine) else { return nil }
+
+        guard let level = parseSetextUnderlineLevel(underlineLine) else { return nil }
+        return SetextHeading(level: level, text: titleTrimmed)
+    }
+
+    private static func parseSetextUnderlineLevel(_ line: String) -> Int? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        let compact = trimmed.filter { !$0.isWhitespace }
+        guard compact.count >= 3 else { return nil }
+
+        if compact.allSatisfy({ $0 == "=" }) {
+            return 1
+        }
+        if compact.allSatisfy({ $0 == "-" }) {
+            return 2
+        }
+
+        return nil
     }
 
     private static func parseHeading(from line: String) -> Heading? {
@@ -275,34 +305,294 @@ enum MessageMarkdownRenderer {
         return compact.allSatisfy { $0 == marker }
     }
 
+    private static func parseList(at startIndex: Int, lines: [String]) -> ParsedList? {
+        guard let firstItem = parseListItem(from: lines[startIndex]) else { return nil }
+
+        let listIndent = firstItem.indent
+        let listKind = firstItem.kind
+
+        var items: [ListItem] = []
+        var index = startIndex
+
+        while index < lines.count {
+            guard let itemStart = parseListItem(from: lines[index]),
+                  itemStart.indent == listIndent,
+                  itemStart.kind == listKind else {
+                break
+            }
+
+            var itemLines: [String] = [itemStart.content]
+            index += 1
+
+            while index < lines.count {
+                let line = lines[index]
+
+                if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    itemLines.append("")
+                    index += 1
+                    continue
+                }
+
+                if let nextItem = parseListItem(from: line),
+                   nextItem.indent == listIndent,
+                   nextItem.kind == listKind {
+                    break
+                }
+
+                let indent = countLeadingIndent(line)
+                if indent <= listIndent, !isBlockquoteLine(line) {
+                    break
+                }
+
+                let stripped = stripLeadingIndent(line, count: min(indent, listIndent + 2))
+                itemLines.append(stripped)
+                index += 1
+            }
+
+            let normalizedItemLines = trimOuterBlankLines(itemLines)
+            let parsedItemBlocks = parseBlocks(from: normalizedItemLines)
+            let blocksForItem: [Block]
+
+            if parsedItemBlocks.isEmpty {
+                if itemStart.content.isEmpty {
+                    blocksForItem = []
+                } else {
+                    blocksForItem = [.paragraph(render(itemStart.content))]
+                }
+            } else {
+                blocksForItem = parsedItemBlocks
+            }
+
+            items.append(ListItem(marker: itemStart.marker, task: itemStart.task, blocks: blocksForItem))
+        }
+
+        guard !items.isEmpty else { return nil }
+        return ParsedList(items: items, linesConsumed: index - startIndex)
+    }
+
     private static func parseListItem(from line: String) -> ParsedListItem? {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let indent = countLeadingIndent(line)
+        guard indent < 4 else { return nil }
+
+        let trimmed = stripLeadingIndent(line, count: indent)
 
         for marker in ["-", "*", "+"] {
             if trimmed.hasPrefix("\(marker) ") {
+                let rawContent = String(trimmed.dropFirst(2))
+                let (taskState, content) = parseTaskState(from: rawContent)
                 return ParsedListItem(
                     kind: .unordered,
                     marker: "•",
-                    content: String(trimmed.dropFirst(2))
+                    task: taskState,
+                    content: content,
+                    indent: indent
                 )
             }
         }
 
         let digits = trimmed.prefix { $0.wholeNumberValue != nil }
         guard !digits.isEmpty else { return nil }
+
         let remainder = trimmed.dropFirst(digits.count)
-        guard remainder.first == ".", remainder.dropFirst().first == " " else { return nil }
+        guard let delimiter = remainder.first, delimiter == "." || delimiter == ")" else { return nil }
+        guard remainder.dropFirst().first == " " else { return nil }
+
+        let rawContent = String(remainder.dropFirst(2))
+        let (taskState, content) = parseTaskState(from: rawContent)
 
         return ParsedListItem(
             kind: .ordered,
             marker: "\(digits).",
-            content: String(remainder.dropFirst(2))
+            task: taskState,
+            content: content,
+            indent: indent
         )
     }
 
-    private static func isListContinuation(_ line: String) -> Bool {
-        let prefix = line.prefix { $0 == " " || $0 == "\t" }
-        return prefix.contains("\t") || prefix.count >= 2
+    private static func parseTaskState(from content: String) -> (TaskState?, String) {
+        let chars = Array(content)
+        guard chars.count >= 4 else { return (nil, content) }
+        guard chars[0] == "[", chars[2] == "]" else { return (nil, content) }
+
+        let stateMarker = chars[1]
+        guard stateMarker == " " || stateMarker == "x" || stateMarker == "X" else { return (nil, content) }
+        guard chars[3] == " " || chars[3] == "\t" else { return (nil, content) }
+
+        let state: TaskState = stateMarker == " " ? .unchecked : .checked
+        return (state, String(chars.dropFirst(4)))
+    }
+
+    private static func parseBlockquote(at startIndex: Int, lines: [String]) -> ParsedBlockquote? {
+        guard isBlockquoteLine(lines[startIndex]) else { return nil }
+
+        var quotedLines: [String] = []
+        var index = startIndex
+
+        while index < lines.count {
+            let line = lines[index]
+
+            if let stripped = stripBlockquotePrefix(from: line) {
+                quotedLines.append(stripped)
+                index += 1
+                continue
+            }
+
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                var probe = index + 1
+                var hasFutureQuoteLine = false
+
+                while probe < lines.count {
+                    let candidate = lines[probe]
+                    if candidate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        probe += 1
+                        continue
+                    }
+                    hasFutureQuoteLine = stripBlockquotePrefix(from: candidate) != nil
+                    break
+                }
+
+                if hasFutureQuoteLine {
+                    quotedLines.append("")
+                    index += 1
+                    continue
+                }
+            }
+
+            break
+        }
+
+        let normalizedQuotedLines = trimOuterBlankLines(quotedLines)
+        let blocks = parseBlocks(from: normalizedQuotedLines)
+        return ParsedBlockquote(blocks: blocks, linesConsumed: index - startIndex)
+    }
+
+    private static func isBlockquoteLine(_ line: String) -> Bool {
+        stripBlockquotePrefix(from: line) != nil
+    }
+
+    private static func stripBlockquotePrefix(from line: String) -> String? {
+        var index = line.startIndex
+        var leading = 0
+
+        while index < line.endIndex, leading < 3, line[index] == " " {
+            index = line.index(after: index)
+            leading += 1
+        }
+
+        guard index < line.endIndex, line[index] == ">" else { return nil }
+        index = line.index(after: index)
+
+        if index < line.endIndex, line[index] == " " {
+            index = line.index(after: index)
+        }
+
+        return String(line[index...])
+    }
+
+    private static func openingCodeFence(from line: String) -> PendingCodeFence? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard let first = trimmed.first, first == "`" || first == "~" else { return nil }
+
+        let markerCount = trimmed.prefix { $0 == first }.count
+        guard markerCount >= 3 else { return nil }
+
+        let remainder = trimmed.dropFirst(markerCount)
+        let language = remainder
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ")
+            .first
+            .map(String.init)
+
+        return PendingCodeFence(marker: first, length: markerCount, language: language)
+    }
+
+    private static func isClosingCodeFence(_ line: String, matching opening: PendingCodeFence) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.first == opening.marker else { return false }
+
+        let count = trimmed.prefix { $0 == opening.marker }.count
+        guard count >= opening.length else { return false }
+
+        let trailing = trimmed.dropFirst(count)
+        return trailing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func parseIndentedCodeBlock(at startIndex: Int, lines: [String]) -> ParsedIndentedCodeBlock? {
+        guard startIndex < lines.count else { return nil }
+        let firstLine = lines[startIndex]
+        guard !firstLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        guard countLeadingIndent(firstLine) >= 4 else { return nil }
+
+        var codeLines: [String] = []
+        var index = startIndex
+
+        while index < lines.count {
+            let line = lines[index]
+
+            if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                codeLines.append("")
+                index += 1
+                continue
+            }
+
+            let indent = countLeadingIndent(line)
+            guard indent >= 4 else { break }
+
+            codeLines.append(stripLeadingIndent(line, count: 4))
+            index += 1
+        }
+
+        while codeLines.last == "" {
+            codeLines.removeLast()
+        }
+
+        return ParsedIndentedCodeBlock(code: codeLines.joined(separator: "\n"), linesConsumed: index - startIndex)
+    }
+
+    private static func countLeadingIndent(_ line: String) -> Int {
+        var count = 0
+        for character in line {
+            if character == " " || character == "\t" {
+                count += 1
+            } else {
+                break
+            }
+        }
+        return count
+    }
+
+    private static func stripLeadingIndent(_ line: String, count: Int) -> String {
+        guard count > 0 else { return line }
+
+        var index = line.startIndex
+        var remaining = count
+
+        while index < line.endIndex, remaining > 0 {
+            let char = line[index]
+            if char == " " || char == "\t" {
+                index = line.index(after: index)
+                remaining -= 1
+            } else {
+                break
+            }
+        }
+
+        return String(line[index...])
+    }
+
+    private static func trimOuterBlankLines(_ lines: [String]) -> [String] {
+        var start = 0
+        var end = lines.count
+
+        while start < end, lines[start].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            start += 1
+        }
+
+        while end > start, lines[end - 1].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            end -= 1
+        }
+
+        return Array(lines[start..<end])
     }
 
     private static func parseTable(at startIndex: Int, lines: [String]) -> ParsedTable? {
@@ -349,8 +639,7 @@ enum MessageMarkdownRenderer {
 
             let leadingColon = trimmed.hasPrefix(":")
             let trailingColon = trimmed.hasSuffix(":")
-            let core = trimmed
-                .trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            let core = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
 
             guard core.count >= 3, core.allSatisfy({ $0 == "-" }) else { return nil }
 
@@ -402,6 +691,20 @@ enum MessageMarkdownRenderer {
     }
 }
 
+private struct MarkdownBlocksStack: View {
+    let blocks: [MessageMarkdownRenderer.Block]
+    let spacing: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                MarkdownBlockView(block: block)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct MarkdownBlockView: View {
     let block: MessageMarkdownRenderer.Block
 
@@ -418,14 +721,28 @@ private struct MarkdownBlockView: View {
             Rectangle()
                 .fill(Color.secondary.opacity(0.18))
                 .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+        case .blockquote(let blocks):
+            HStack(alignment: .top, spacing: 10) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.25))
+                    .frame(width: 3)
+
+                MarkdownBlocksStack(blocks: blocks, spacing: 8)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .list(let items):
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(item.marker)
-                            .fontWeight(.semibold)
-                        Text(item.content)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .top, spacing: 8) {
+                        listMarker(item)
+                            .frame(minWidth: 24, alignment: .trailing)
+
+                        if item.blocks.isEmpty {
+                            Text("")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            MarkdownBlocksStack(blocks: item.blocks, spacing: 8)
+                        }
                     }
                 }
             }
@@ -490,6 +807,17 @@ private struct MarkdownBlockView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    @ViewBuilder
+    private func listMarker(_ item: MessageMarkdownRenderer.ListItem) -> some View {
+        if let task = item.task {
+            Text(task == .checked ? "☑" : "☐")
+                .fontWeight(.semibold)
+        } else {
+            Text(item.marker)
+                .fontWeight(.semibold)
         }
     }
 
