@@ -70,7 +70,7 @@ final class KodantoAppModel {
             sseStreamProvider: dependencies.sseStreamProvider,
             clock: dependencies.clock
         )
-        terminalStore = TerminalStore()
+        terminalStore = TerminalStore(resumeStore: dependencies.terminalResumeStore)
 
         profiles = dependencies.profileStore.load()
         if profiles.isEmpty {
@@ -1004,6 +1004,7 @@ final class KodantoAppModel {
             sessionDetailStore.selectSession(selectedSessionID)
             sessionRequestStore.clearRequests()
         }
+        terminalStore.setPersistenceScope(profileID: selectedProfileID)
         sessionRequestStore.updateSelection(sessionID: selectedSessionID, directory: selectedProject?.worktree)
         terminalStore.setActiveDirectory(selectedProject?.worktree)
         ensureTerminalConnectedIfNeeded()

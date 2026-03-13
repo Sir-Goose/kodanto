@@ -175,6 +175,7 @@ final class KodantoAppModelSessionActionsTests: XCTestCase {
             modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: defaults),
             permissionAutoAcceptStore: PermissionAutoAcceptStore(userDefaults: defaults),
             terminalLayoutStore: TerminalLayoutStore(userDefaults: defaults),
+            terminalResumeStore: TerminalResumeStateStore(userDefaults: defaults),
             projectOrderStore: ProjectOrderStore(userDefaults: defaults),
             clock: TestClock()
         )

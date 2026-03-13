@@ -82,6 +82,7 @@ struct KodantoAppDependencies {
     let modelVariantSelectionStore: ModelVariantSelectionStoring
     let permissionAutoAcceptStore: PermissionAutoAcceptStoring
     let terminalLayoutStore: TerminalLayoutStoring
+    let terminalResumeStore: TerminalResumeStateStoring
     let projectOrderStore: ProjectOrderStoring
     let clock: AppClock
 
@@ -95,6 +96,7 @@ struct KodantoAppDependencies {
             modelVariantSelectionStore: ModelVariantSelectionStore(userDefaults: userDefaults),
             permissionAutoAcceptStore: PermissionAutoAcceptStore(userDefaults: userDefaults),
             terminalLayoutStore: TerminalLayoutStore(userDefaults: userDefaults),
+            terminalResumeStore: TerminalResumeStateStore(userDefaults: userDefaults),
             projectOrderStore: ProjectOrderStore(userDefaults: userDefaults),
             clock: SystemAppClock()
         )

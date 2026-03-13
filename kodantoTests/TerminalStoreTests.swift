@@ -7,7 +7,6 @@ final class TerminalStoreTests: XCTestCase {
     func testEnsureConnectedCreatesPTYWhenNoneExists() async {
         let service = MockTerminalAPIService()
         service.listedPTYs = []
-        service.createdPTY = makePTY(id: "pty-created")
 
         let harness = ConnectionHarness()
         let store = makeStore(harness: harness)
@@ -19,9 +18,10 @@ final class TerminalStoreTests: XCTestCase {
             client: service,
             requestBuilder: requestBuilder
         )
+        await Task.yield()
 
         XCTAssertEqual(service.createCalls, ["/tmp/project-a"])
-        XCTAssertEqual(store.activePTY?.id, "pty-created")
+        XCTAssertEqual(store.activePTY?.id, "pty-1")
         XCTAssertEqual(store.activePhase, .connected)
         XCTAssertEqual(harness.connections.count, 1)
     }
@@ -55,7 +55,7 @@ final class TerminalStoreTests: XCTestCase {
         XCTAssertEqual(harness.connections.count, 2)
     }
 
-    func testPTYExitedEventClearsActiveSession() async {
+    func testPTYExitedEventClearsActiveSession() async throws {
         let service = MockTerminalAPIService()
         service.listedPTYs = []
 
@@ -136,7 +136,162 @@ final class TerminalStoreTests: XCTestCase {
         XCTAssertTrue(store.activePTY?.args.contains("-l") == true)
     }
 
-    private func makeStore(harness: ConnectionHarness) -> TerminalStore {
+    func testEnsureConnectedReattachesUsingPersistedSnapshotAndCursor() async throws {
+        let service = MockTerminalAPIService()
+        let directory = "/tmp/project-a"
+        let persistedPTY = OpenCodePTY(
+            id: "pty-persisted",
+            title: "Terminal",
+            command: "zsh",
+            args: ["-l"],
+            cwd: directory,
+            status: .running,
+            pid: 42
+        )
+        service.ptysByID[persistedPTY.id] = persistedPTY
+
+        let resumeStore = InMemoryTerminalResumeStore()
+        let profileID = UUID()
+        resumeStore.save(
+            TerminalResumeState(
+                ptyID: persistedPTY.id,
+                cursor: 37,
+                buffer: "previous output\n"
+            ),
+            profileID: profileID,
+            directory: directory
+        )
+
+        let harness = ConnectionHarness()
+        let store = makeStore(
+            harness: harness,
+            resumeStore: resumeStore,
+            persistDebounce: .zero
+        )
+        store.setPersistenceScope(profileID: profileID)
+        store.setActiveDirectory(directory)
+
+        await store.ensureConnected(
+            directory: directory,
+            launchConfiguration: localLaunchConfiguration(directory: directory),
+            client: service,
+            requestBuilder: requestBuilder
+        )
+
+        XCTAssertEqual(service.ptySessionCalls, ["\(directory)/\(persistedPTY.id)"])
+        XCTAssertEqual(service.createCalls, [])
+        XCTAssertEqual(store.activePTY?.id, persistedPTY.id)
+        let request = try XCTUnwrap(harness.connections.first?.request)
+        let components = try XCTUnwrap(URLComponents(url: request.url!, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.queryItems?.first(where: { $0.name == "cursor" })?.value, "37")
+        XCTAssertEqual(store.consumeActiveOutputChunks(), ["previous output\n"])
+    }
+
+    func testEnsureConnectedFallsBackToFreshPTYWhenPersistedPTYIsMissing() async {
+        let service = MockTerminalAPIService()
+        let directory = "/tmp/project-a"
+        let resumeStore = InMemoryTerminalResumeStore()
+        let profileID = UUID()
+        resumeStore.save(
+            TerminalResumeState(ptyID: "pty-missing", cursor: 55, buffer: "stale"),
+            profileID: profileID,
+            directory: directory
+        )
+
+        let harness = ConnectionHarness()
+        let store = makeStore(
+            harness: harness,
+            resumeStore: resumeStore,
+            persistDebounce: .zero
+        )
+        store.setPersistenceScope(profileID: profileID)
+        store.setActiveDirectory(directory)
+
+        await store.ensureConnected(
+            directory: directory,
+            launchConfiguration: localLaunchConfiguration(directory: directory),
+            client: service,
+            requestBuilder: requestBuilder
+        )
+
+        XCTAssertEqual(service.ptySessionCalls, ["\(directory)/pty-missing"])
+        XCTAssertEqual(service.createCalls, [directory])
+        XCTAssertEqual(store.activePTY?.id, "pty-1")
+        XCTAssertEqual(resumeStore.removeCalls, ["\(profileID.uuidString)::\(directory)"])
+    }
+
+    func testPTYExitedClearsPersistedResumeSnapshot() async throws {
+        let service = MockTerminalAPIService()
+        let resumeStore = InMemoryTerminalResumeStore()
+        let profileID = UUID()
+        let directory = "/tmp/project-a"
+
+        let harness = ConnectionHarness()
+        let store = makeStore(
+            harness: harness,
+            resumeStore: resumeStore,
+            persistDebounce: .zero
+        )
+        store.setPersistenceScope(profileID: profileID)
+        store.setActiveDirectory(directory)
+        await store.ensureConnected(
+            directory: directory,
+            launchConfiguration: localLaunchConfiguration(directory: directory),
+            client: service,
+            requestBuilder: requestBuilder
+        )
+
+        let activePTYID = try XCTUnwrap(store.activePTY?.id)
+        XCTAssertNotNil(resumeStore.load(profileID: profileID, directory: directory))
+
+        store.handleGlobalEvent(
+            OpenCodeGlobalEvent(
+                directory: directory,
+                payload: .ptyExited(.init(id: activePTYID, exitCode: 0))
+            )
+        )
+        await Task.yield()
+
+        XCTAssertNil(resumeStore.load(profileID: profileID, directory: directory))
+    }
+
+    func testResumeBufferIsTrimmedToConfiguredByteLimit() async throws {
+        let service = MockTerminalAPIService()
+        let resumeStore = InMemoryTerminalResumeStore()
+        let profileID = UUID()
+        let directory = "/tmp/project-a"
+
+        let harness = ConnectionHarness()
+        let store = makeStore(
+            harness: harness,
+            resumeStore: resumeStore,
+            persistDebounce: .zero,
+            maxResumeBufferBytes: 16
+        )
+        store.setPersistenceScope(profileID: profileID)
+        store.setActiveDirectory(directory)
+        await store.ensureConnected(
+            directory: directory,
+            launchConfiguration: localLaunchConfiguration(directory: directory),
+            client: service,
+            requestBuilder: requestBuilder
+        )
+
+        let output = "012345678901234567890123456789"
+        harness.connections.first?.emitOutput(output)
+        await Task.yield()
+
+        let saved = try XCTUnwrap(resumeStore.load(profileID: profileID, directory: directory))
+        XCTAssertLessThanOrEqual(saved.buffer.utf8.count, 16)
+        XCTAssertEqual(saved.buffer, "4567890123456789")
+    }
+
+    private func makeStore(
+        harness: ConnectionHarness,
+        resumeStore: TerminalResumeStateStoring = InMemoryTerminalResumeStore(),
+        persistDebounce: Duration = .milliseconds(250),
+        maxResumeBufferBytes: Int = 256 * 1024
+    ) -> TerminalStore {
         TerminalStore(
             connectionFactory: { request, onConnected, onOutput, onCursor, onDisconnect in
                 harness.makeConnection(
@@ -146,7 +301,10 @@ final class TerminalStoreTests: XCTestCase {
                     onCursor: onCursor,
                     onDisconnect: onDisconnect
                 )
-            }
+            },
+            resumeStore: resumeStore,
+            persistDebounce: persistDebounce,
+            maxResumeBufferBytes: maxResumeBufferBytes
         )
     }
 
@@ -157,18 +315,6 @@ final class TerminalStoreTests: XCTestCase {
             URLQueryItem(name: "cursor", value: String(cursor))
         ]
         return URLRequest(url: components.url!)
-    }
-
-    private func makePTY(id: String) -> OpenCodePTY {
-        OpenCodePTY(
-            id: id,
-            title: "Terminal",
-            command: "zsh",
-            args: ["-l"],
-            cwd: "/tmp/project",
-            status: .running,
-            pid: 123
-        )
     }
 
     private func localLaunchConfiguration(directory: String) -> TerminalStore.LaunchConfiguration {
@@ -189,6 +335,29 @@ final class TerminalStoreTests: XCTestCase {
             args: nil,
             enforceShell: false
         )
+    }
+}
+
+private final class InMemoryTerminalResumeStore: TerminalResumeStateStoring {
+    private var states: [String: TerminalResumeState] = [:]
+    private(set) var removeCalls: [String] = []
+
+    func load(profileID: UUID, directory: String) -> TerminalResumeState? {
+        states[scopeKey(profileID: profileID, directory: directory)]
+    }
+
+    func save(_ state: TerminalResumeState, profileID: UUID, directory: String) {
+        states[scopeKey(profileID: profileID, directory: directory)] = state
+    }
+
+    func remove(profileID: UUID, directory: String) {
+        let key = scopeKey(profileID: profileID, directory: directory)
+        removeCalls.append(key)
+        states.removeValue(forKey: key)
+    }
+
+    private func scopeKey(profileID: UUID, directory: String) -> String {
+        "\(profileID.uuidString)::\(directory)"
     }
 }
 
@@ -264,25 +433,22 @@ private final class FakePTYConnection: PTYWebSocketConnecting {
 
 private final class MockTerminalAPIService: OpenCodeAPIService {
     var listedPTYs: [OpenCodePTY] = []
-    var createdPTY = OpenCodePTY(
-        id: "pty-1",
-        title: "Terminal",
-        command: "zsh",
-        args: [],
-        cwd: "/tmp/project",
-        status: .running,
-        pid: 1
-    )
+    var ptysByID: [String: OpenCodePTY] = [:]
 
     private(set) var createCalls: [String] = []
     private(set) var removeCalls: [String] = []
+    private(set) var ptySessionCalls: [String] = []
 
     func ptySessions(directory: String) async throws -> [OpenCodePTY] {
         listedPTYs
     }
 
     func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY {
-        listedPTYs.first(where: { $0.id == ptyID }) ?? createdPTY
+        ptySessionCalls.append("\(directory)/\(ptyID)")
+        if let mapped = ptysByID[ptyID] {
+            return mapped
+        }
+        throw OpenCodeAPIError.serverError(statusCode: 404, message: "Missing PTY")
     }
 
     func createPTY(
@@ -294,7 +460,7 @@ private final class MockTerminalAPIService: OpenCodeAPIService {
     ) async throws -> OpenCodePTY {
         createCalls.append(directory)
         let index = createCalls.count
-        return OpenCodePTY(
+        let created = OpenCodePTY(
             id: "pty-\(index)",
             title: title ?? "Terminal",
             command: command ?? "bash",
@@ -303,6 +469,8 @@ private final class MockTerminalAPIService: OpenCodeAPIService {
             status: .running,
             pid: index
         )
+        ptysByID[created.id] = created
+        return created
     }
 
     func updatePTY(
@@ -312,11 +480,12 @@ private final class MockTerminalAPIService: OpenCodeAPIService {
         rows: Int?,
         cols: Int?
     ) async throws -> OpenCodePTY {
-        ptySession(ptyID: ptyID, directory: directory)
+        try await ptySession(ptyID: ptyID, directory: directory)
     }
 
     func removePTY(ptyID: String, directory: String) async throws {
         removeCalls.append("\(directory)/\(ptyID)")
+        ptysByID.removeValue(forKey: ptyID)
     }
 
     func health() async throws -> OpenCodeHealth { fatalError("unused") }

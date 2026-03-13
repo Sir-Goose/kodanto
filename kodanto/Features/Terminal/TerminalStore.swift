@@ -38,6 +38,10 @@ final class TerminalStore {
     private struct WorkspaceSession {
         var pty: OpenCodePTY?
         var cursor: Int = 0
+        var resumeBuffer = ""
+        var persistedPTYID: String?
+        var didHydrateResume = false
+        var didQueuePersistedBuffer = false
         var phase: ConnectionPhase = .closed
         var rows: Int?
         var cols: Int?
@@ -48,20 +52,49 @@ final class TerminalStore {
     }
 
     private let connectionFactory: ConnectionFactory
+    private let resumeStore: TerminalResumeStateStoring
+    private let persistDebounce: Duration
+    private let maxResumeBufferBytes: Int
 
     private var sessionsByDirectory: [String: WorkspaceSession] = [:]
+    private var persistTasksByDirectory: [String: Task<Void, Never>] = [:]
+    private var persistenceProfileID: UUID?
 
     var activeDirectory: String?
     var activePTY: OpenCodePTY?
     var activePhase: ConnectionPhase = .closed
     var activeOutputRevision: Int = 0
 
-    init(connectionFactory: @escaping ConnectionFactory) {
+    init(
+        connectionFactory: @escaping ConnectionFactory,
+        resumeStore: TerminalResumeStateStoring? = nil,
+        persistDebounce: Duration = .milliseconds(250),
+        maxResumeBufferBytes: Int = 256 * 1024
+    ) {
         self.connectionFactory = connectionFactory
+        self.resumeStore = resumeStore ?? TerminalResumeStateStore()
+        self.persistDebounce = persistDebounce
+        self.maxResumeBufferBytes = max(1, maxResumeBufferBytes)
     }
 
     convenience init() {
-        self.init(connectionFactory: Self.makeLiveConnection)
+        self.init(
+            connectionFactory: Self.makeLiveConnection,
+            resumeStore: TerminalResumeStateStore()
+        )
+    }
+
+    convenience init(
+        resumeStore: TerminalResumeStateStoring,
+        persistDebounce: Duration = .milliseconds(250),
+        maxResumeBufferBytes: Int = 256 * 1024
+    ) {
+        self.init(
+            connectionFactory: Self.makeLiveConnection,
+            resumeStore: resumeStore,
+            persistDebounce: persistDebounce,
+            maxResumeBufferBytes: maxResumeBufferBytes
+        )
     }
 
     private static func makeLiveConnection(
@@ -92,6 +125,10 @@ final class TerminalStore {
         syncActiveSnapshot()
     }
 
+    func setPersistenceScope(profileID: UUID?) {
+        persistenceProfileID = profileID
+    }
+
     func ensureConnected(
         directory: String,
         launchConfiguration: LaunchConfiguration,
@@ -99,6 +136,7 @@ final class TerminalStore {
         requestBuilder: (_ ptyID: String, _ directory: String, _ cursor: Int) throws -> URLRequest
     ) async {
         var session = sessionsByDirectory[directory] ?? WorkspaceSession()
+        hydrateSessionFromResumeIfNeeded(directory: directory, session: &session)
 
         if let cachedPTY = session.pty,
            cachedPTY.status == .running,
@@ -120,9 +158,13 @@ final class TerminalStore {
 
             session.pty = nil
             session.cursor = 0
+            session.resumeBuffer = ""
+            session.persistedPTYID = nil
+            session.didQueuePersistedBuffer = false
             session.phase = .closed
             sessionsByDirectory[directory] = session
             syncActiveSnapshot()
+            clearPersistedResume(directory: directory)
         }
 
         if session.connection != nil,
@@ -140,13 +182,25 @@ final class TerminalStore {
             syncActiveSnapshot()
 
             do {
-                let existing = try await client.ptySessions(directory: directory)
-                let resolved = existing.first(where: { pty in
-                    pty.status == .running && isReusable(pty, configuration: launchConfiguration)
-                })
-                if let resolved {
-                    session.pty = resolved
-                } else {
+                if let persistedPTYID = session.persistedPTYID {
+                    let persistedPTY = try await client.ptySession(ptyID: persistedPTYID, directory: directory)
+                    if persistedPTY.status == .running && isReusable(persistedPTY, configuration: launchConfiguration) {
+                        session.pty = persistedPTY
+                        if !session.resumeBuffer.isEmpty, !session.didQueuePersistedBuffer {
+                            session.queuedOutput.append(session.resumeBuffer)
+                            session.didQueuePersistedBuffer = true
+                            session.outputRevision &+= 1
+                        }
+                    } else {
+                        session.persistedPTYID = nil
+                        session.cursor = 0
+                        session.resumeBuffer = ""
+                        session.didQueuePersistedBuffer = false
+                        clearPersistedResume(directory: directory)
+                    }
+                }
+
+                if session.pty == nil {
                     session.pty = try await client.createPTY(
                         directory: directory,
                         title: launchConfiguration.title,
@@ -154,12 +208,39 @@ final class TerminalStore {
                         command: launchConfiguration.command,
                         args: launchConfiguration.args
                     )
+                    session.cursor = 0
+                    session.resumeBuffer = ""
+                    session.persistedPTYID = nil
+                    session.didQueuePersistedBuffer = false
                 }
             } catch {
-                session.phase = .failed(error.localizedDescription)
-                sessionsByDirectory[directory] = session
-                syncActiveSnapshot()
-                return
+                if session.persistedPTYID != nil {
+                    session.persistedPTYID = nil
+                    session.cursor = 0
+                    session.resumeBuffer = ""
+                    session.didQueuePersistedBuffer = false
+                    clearPersistedResume(directory: directory)
+
+                    do {
+                        session.pty = try await client.createPTY(
+                            directory: directory,
+                            title: launchConfiguration.title,
+                            cwd: launchConfiguration.cwd,
+                            command: launchConfiguration.command,
+                            args: launchConfiguration.args
+                        )
+                    } catch {
+                        session.phase = .failed(error.localizedDescription)
+                        sessionsByDirectory[directory] = session
+                        syncActiveSnapshot()
+                        return
+                    }
+                } else {
+                    session.phase = .failed(error.localizedDescription)
+                    sessionsByDirectory[directory] = session
+                    syncActiveSnapshot()
+                    return
+                }
             }
         }
 
@@ -211,6 +292,7 @@ final class TerminalStore {
         session.connection = connection
         sessionsByDirectory[directory] = session
         syncActiveSnapshot()
+        schedulePersist(directory: directory)
 
         await connection.connect()
     }
@@ -231,6 +313,15 @@ final class TerminalStore {
     }
 
     func disconnectAll() async {
+        for directory in sessionsByDirectory.keys {
+            persistSnapshotNow(directory: directory)
+        }
+
+        for task in persistTasksByDirectory.values {
+            task.cancel()
+        }
+        persistTasksByDirectory.removeAll()
+
         let connections = sessionsByDirectory.values.compactMap(\.connection)
         for connection in connections {
             await connection.disconnect()
@@ -317,6 +408,7 @@ final class TerminalStore {
             }
             sessionsByDirectory[directory] = session
             syncActiveSnapshot()
+            schedulePersist(directory: directory)
 
         case .ptyExited(let payload):
             closeSessionIfMatchingPTY(directory: directory, ptyID: payload.id)
@@ -334,9 +426,14 @@ final class TerminalStore {
             return
         }
 
+        cancelPersistTask(directory: directory)
+        clearPersistedResume(directory: directory)
         session.phase = .closed
         session.pty = nil
         session.cursor = 0
+        session.resumeBuffer = ""
+        session.persistedPTYID = nil
+        session.didQueuePersistedBuffer = false
         let connection = session.connection
         session.connection = nil
         session.connectionToken = UUID()
@@ -352,6 +449,7 @@ final class TerminalStore {
 
     private func disconnectSession(directory: String) async {
         guard var session = sessionsByDirectory[directory] else { return }
+        persistSnapshotNow(directory: directory)
         let connection = session.connection
         session.connection = nil
         session.connectionToken = UUID()
@@ -381,19 +479,23 @@ final class TerminalStore {
         if session.queuedOutput.count > 1_000 {
             session.queuedOutput.removeFirst(session.queuedOutput.count - 1_000)
         }
+        session.resumeBuffer = trimmedResumeBuffer(session.resumeBuffer + output)
         session.outputRevision &+= 1
         sessionsByDirectory[directory] = session
         syncActiveSnapshot()
+        schedulePersist(directory: directory)
     }
 
     private func handleCursor(directory: String, token: UUID, cursor: Int) {
         guard var session = sessionsByDirectory[directory], session.connectionToken == token else { return }
         session.cursor = max(cursor, 0)
         sessionsByDirectory[directory] = session
+        schedulePersist(directory: directory)
     }
 
     private func handleConnectionClosed(directory: String, token: UUID, error: Error?) {
         guard var session = sessionsByDirectory[directory], session.connectionToken == token else { return }
+        cancelPersistTask(directory: directory)
         session.connection = nil
 
         if session.pty == nil {
@@ -406,6 +508,7 @@ final class TerminalStore {
 
         sessionsByDirectory[directory] = session
         syncActiveSnapshot()
+        persistSnapshotNow(directory: directory)
     }
 
     private func markFailed(directory: String, message: String) {
@@ -413,6 +516,7 @@ final class TerminalStore {
         session.phase = .failed(message)
         sessionsByDirectory[directory] = session
         syncActiveSnapshot()
+        persistSnapshotNow(directory: directory)
     }
 
     private func isReusable(_ pty: OpenCodePTY, configuration: LaunchConfiguration) -> Bool {
@@ -433,6 +537,81 @@ final class TerminalStore {
 
     private func shellBaseName(from command: String) -> String {
         URL(fileURLWithPath: command).lastPathComponent.lowercased()
+    }
+
+    private func hydrateSessionFromResumeIfNeeded(directory: String, session: inout WorkspaceSession) {
+        guard !session.didHydrateResume else { return }
+        session.didHydrateResume = true
+
+        guard let profileID = persistenceProfileID,
+              let saved = resumeStore.load(profileID: profileID, directory: directory)
+        else {
+            return
+        }
+
+        session.persistedPTYID = saved.ptyID
+        session.cursor = max(saved.cursor, 0)
+        session.resumeBuffer = trimmedResumeBuffer(saved.buffer)
+        session.didQueuePersistedBuffer = false
+    }
+
+    private func schedulePersist(directory: String) {
+        guard persistenceProfileID != nil else { return }
+
+        if persistDebounce == .zero {
+            persistSnapshotNow(directory: directory)
+            return
+        }
+
+        cancelPersistTask(directory: directory)
+        let task = Task { [weak self] in
+            try? await Task.sleep(for: self?.persistDebounce ?? .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.persistSnapshotNow(directory: directory)
+            }
+        }
+        persistTasksByDirectory[directory] = task
+    }
+
+    private func cancelPersistTask(directory: String) {
+        persistTasksByDirectory[directory]?.cancel()
+        persistTasksByDirectory.removeValue(forKey: directory)
+    }
+
+    private func persistSnapshotNow(directory: String) {
+        guard let profileID = persistenceProfileID else { return }
+        guard let session = sessionsByDirectory[directory], let pty = session.pty else {
+            resumeStore.remove(profileID: profileID, directory: directory)
+            return
+        }
+
+        let snapshot = TerminalResumeState(
+            ptyID: pty.id,
+            cursor: max(session.cursor, 0),
+            buffer: trimmedResumeBuffer(session.resumeBuffer)
+        )
+        resumeStore.save(snapshot, profileID: profileID, directory: directory)
+    }
+
+    private func clearPersistedResume(directory: String) {
+        cancelPersistTask(directory: directory)
+        guard let profileID = persistenceProfileID else { return }
+        resumeStore.remove(profileID: profileID, directory: directory)
+    }
+
+    private func trimmedResumeBuffer(_ value: String) -> String {
+        guard value.utf8.count > maxResumeBufferBytes else { return value }
+
+        var start = value.startIndex
+        var remainingBytes = value.utf8.count
+        while remainingBytes > maxResumeBufferBytes, start < value.endIndex {
+            let next = value.index(after: start)
+            remainingBytes -= value[start].utf8.count
+            start = next
+        }
+
+        return String(value[start...])
     }
 
     private func syncActiveSnapshot() {
