@@ -107,12 +107,19 @@ struct AgentPicker: View {
         return "No primary agents available. Prompts will use the server default agent."
     }
 
+    private var selectionIconSystemName: String {
+        AgentModeIconResolver.systemImageName(
+            selectedAgentName: model.selectedPromptAgentName,
+            availableAgents: model.availablePromptAgents
+        )
+    }
+
     var body: some View {
         Button {
             isShowingPicker.toggle()
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "person.crop.circle")
+                Image(systemName: selectionIconSystemName)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
 
@@ -205,6 +212,50 @@ struct AgentPicker: View {
 
     private var backgroundColor: Color {
         isHovered ? Color.secondary.opacity(0.08) : .clear
+    }
+}
+
+enum AgentModeIconResolver {
+    enum Kind {
+        case build
+        case plan
+        case other
+    }
+
+    static func systemImageName(selectedAgentName: String?, availableAgents: [OpenCodeAgent]) -> String {
+        switch classify(selectedAgentName: selectedAgentName, availableAgents: availableAgents) {
+        case .build:
+            return "hammer"
+        case .plan:
+            return "checklist"
+        case .other:
+            return "person.crop.circle"
+        }
+    }
+
+    static func classify(selectedAgentName: String?, availableAgents: [OpenCodeAgent]) -> Kind {
+        let normalizedSelectedName = normalized(selectedAgentName)
+        let selectedAgent = normalizedSelectedName.flatMap { selectedName in
+            availableAgents.first { normalized($0.name) == selectedName }
+        }
+        let normalizedSelectedMode = normalized(selectedAgent?.mode)
+
+        if normalizedSelectedName == "build" || normalizedSelectedMode == "build" {
+            return .build
+        }
+
+        if normalizedSelectedName == "plan" || normalizedSelectedMode == "plan" {
+            return .plan
+        }
+
+        return .other
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+        return value.lowercased()
     }
 }
 

@@ -30,8 +30,11 @@ struct MainView: View {
             }
         }
         .background {
-            WindowTitlebarAccessory(content: connectionStatusButton)
-                .frame(width: 0, height: 0)
+            ZStack {
+                WindowTitlebarAccessory(content: connectionStatusButton)
+                WindowDoubleClickBehavior()
+            }
+            .frame(width: 0, height: 0)
         }
         .task {
             if case .idle = model.connectionState {

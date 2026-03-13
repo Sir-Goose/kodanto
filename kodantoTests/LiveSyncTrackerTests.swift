@@ -180,6 +180,75 @@ final class ComposerAgentSelectionTests: XCTestCase {
         }
     }
 
+    func testAgentIconResolverReturnsHammerForBuildAgent() {
+        let icon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: "build",
+            availableAgents: [
+                OpenCodeAgent(name: "build", description: nil, mode: "primary", hidden: nil)
+            ]
+        )
+
+        XCTAssertEqual(icon, "hammer")
+    }
+
+    func testAgentIconResolverReturnsChecklistForPlanAgent() {
+        let icon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: "plan",
+            availableAgents: [
+                OpenCodeAgent(name: "plan", description: nil, mode: "primary", hidden: nil)
+            ]
+        )
+
+        XCTAssertEqual(icon, "checklist")
+    }
+
+    func testAgentIconResolverReturnsGenericForCustomAgent() {
+        let icon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: "custom",
+            availableAgents: [
+                OpenCodeAgent(name: "custom", description: nil, mode: "all", hidden: nil)
+            ]
+        )
+
+        XCTAssertEqual(icon, "person.crop.circle")
+    }
+
+    func testAgentIconResolverNormalizesCaseAndWhitespace() {
+        let buildIcon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: " Build ",
+            availableAgents: [
+                OpenCodeAgent(name: "build", description: nil, mode: "primary", hidden: nil)
+            ]
+        )
+        let planIcon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: " PLAN ",
+            availableAgents: [
+                OpenCodeAgent(name: "plan", description: nil, mode: "primary", hidden: nil)
+            ]
+        )
+
+        XCTAssertEqual(buildIcon, "hammer")
+        XCTAssertEqual(planIcon, "checklist")
+    }
+
+    func testAgentIconResolverUsesSelectedAgentModeForCustomAgentNames() {
+        let buildModeIcon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: "my-custom-build-agent",
+            availableAgents: [
+                OpenCodeAgent(name: "my-custom-build-agent", description: nil, mode: "build", hidden: nil)
+            ]
+        )
+        let planModeIcon = AgentModeIconResolver.systemImageName(
+            selectedAgentName: "my-custom-plan-agent",
+            availableAgents: [
+                OpenCodeAgent(name: "my-custom-plan-agent", description: nil, mode: "plan", hidden: nil)
+            ]
+        )
+
+        XCTAssertEqual(buildModeIcon, "hammer")
+        XCTAssertEqual(planModeIcon, "checklist")
+    }
+
     @MainActor
     private func makeStore() -> ComposerStore {
         let suiteName = "kodanto-tests-\(UUID().uuidString)"

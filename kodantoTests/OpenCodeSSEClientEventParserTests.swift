@@ -45,3 +45,68 @@ final class OpenCodeSSEClientEventParserTests: XCTestCase {
         }
     }
 }
+
+final class WindowDoubleClickBehaviorTests: XCTestCase {
+    func testPreferenceResolverMapsMinimizeSetting() {
+        let action = WindowDoubleClickPreferenceResolver.resolve(
+            actionOnDoubleClickValue: "Minimize",
+            legacyMiniaturize: nil
+        )
+
+        XCTAssertEqual(action, .minimize)
+    }
+
+    func testPreferenceResolverMapsNoneSetting() {
+        let action = WindowDoubleClickPreferenceResolver.resolve(
+            actionOnDoubleClickValue: "None",
+            legacyMiniaturize: nil
+        )
+
+        XCTAssertEqual(action, .none)
+    }
+
+    func testPreferenceResolverTreatsMaximizeAsZoom() {
+        let action = WindowDoubleClickPreferenceResolver.resolve(
+            actionOnDoubleClickValue: "Maximize",
+            legacyMiniaturize: nil
+        )
+
+        XCTAssertEqual(action, .zoom)
+    }
+
+    func testPreferenceResolverFallsBackToLegacyMiniaturizeTrue() {
+        let action = WindowDoubleClickPreferenceResolver.resolve(
+            actionOnDoubleClickValue: nil,
+            legacyMiniaturize: true
+        )
+
+        XCTAssertEqual(action, .minimize)
+    }
+
+    func testPreferenceResolverFallsBackToLegacyMiniaturizeFalse() {
+        let action = WindowDoubleClickPreferenceResolver.resolve(
+            actionOnDoubleClickValue: nil,
+            legacyMiniaturize: false
+        )
+
+        XCTAssertEqual(action, .zoom)
+    }
+
+    func testPreferenceResolverDefaultsToZoomWhenMissing() {
+        let action = WindowDoubleClickPreferenceResolver.resolve(
+            actionOnDoubleClickValue: nil,
+            legacyMiniaturize: nil
+        )
+
+        XCTAssertEqual(action, .zoom)
+    }
+
+    func testTopChromeHitIsTrueAtBoundaryAndAbove() {
+        XCTAssertTrue(WindowDoubleClickBehavior.isTopChromeHit(locationInWindowY: 100, contentLayoutMaxY: 100))
+        XCTAssertTrue(WindowDoubleClickBehavior.isTopChromeHit(locationInWindowY: 101, contentLayoutMaxY: 100))
+    }
+
+    func testTopChromeHitIsFalseBelowBoundary() {
+        XCTAssertFalse(WindowDoubleClickBehavior.isTopChromeHit(locationInWindowY: 99, contentLayoutMaxY: 100))
+    }
+}
