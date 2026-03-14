@@ -180,6 +180,7 @@ struct MonospaceBlock: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: true, vertical: true)
                 .padding(10)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -200,6 +201,7 @@ struct ShellTranscriptBlock: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: true, vertical: true)
                         .padding(10)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(maxHeight: maxHeight)

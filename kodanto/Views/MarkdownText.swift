@@ -761,6 +761,7 @@ private struct MarkdownBlockView: View {
                         .textSelection(.enabled)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: true, vertical: true)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
