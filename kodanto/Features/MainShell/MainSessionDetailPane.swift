@@ -8,6 +8,7 @@ struct MainSessionDetailPane: View {
     @State private var promptEditorHeight: CGFloat = 0
     @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
     @State private var transcriptDisclosureStore = TranscriptDisclosureStore()
+    @State private var userIsAtBottom: Bool = true
 
     private let transcriptScrollTarget = "transcript-bottom"
 
@@ -175,6 +176,13 @@ struct MainSessionDetailPane: View {
                 .padding()
                 .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    let visibleRect = geometry.visibleRect
+                    let distanceFromBottom = geometry.contentSize.height - visibleRect.maxY
+                    return distanceFromBottom < 50
+                } action: { _, isAtBottom in
+                    userIsAtBottom = isAtBottom
+                }
             }
             .defaultScrollAnchor(.bottom)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -187,20 +195,11 @@ struct MainSessionDetailPane: View {
                 transcriptDisclosureStore.reset()
                 jumpTranscriptToBottom(using: proxy)
             }
-            .onChange(of: selectedSessionTranscriptRevision) { _, _ in
-                handleTranscriptChange(using: proxy)
-            }
-            .onChange(of: sessionTodos.count) { _, _ in
-                handleTranscriptChange(using: proxy)
-            }
-            .onChange(of: permissions.count) { _, _ in
-                handleTranscriptChange(using: proxy)
-            }
-            .onChange(of: questions.count) { _, _ in
-                handleTranscriptChange(using: proxy)
-            }
-            .onChange(of: isSelectedSessionRunning) { _, isRunning in
-                if isRunning {
+            .onChange(of: isSelectedSessionRunning) { oldValue, newValue in
+                if newValue && userIsAtBottom {
+                    scrollTranscriptToBottom(using: proxy)
+                }
+                if oldValue && !newValue && userIsAtBottom {
                     scrollTranscriptToBottom(using: proxy)
                 }
             }
@@ -337,7 +336,7 @@ struct MainSessionDetailPane: View {
     }
 
     private func scrollTranscriptToBottomIfNeeded(using proxy: ScrollViewProxy) {
-        guard isSelectedSessionRunning else { return }
+        guard isSelectedSessionRunning && userIsAtBottom else { return }
         scrollTranscriptToBottom(using: proxy)
     }
 
