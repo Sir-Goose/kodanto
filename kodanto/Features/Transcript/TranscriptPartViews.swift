@@ -155,27 +155,60 @@ struct ThinkingIndicatorView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(Color.accentColor)
-                .frame(width: 6, height: 6)
-                .opacity(0.3 + 0.7 * (1.0 + Foundation.sin(phase)) / 2.0)
-
-            Text("Thinking...")
+            Text("Thinking")
                 .font(.callout.weight(.medium))
                 .foregroundStyle(.secondary)
+                .modifier(ShimmerTextModifier())
+                .onAppear {
+                    withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                        phase = 1
+                    }
+                }
 
             if let heading {
-                Text(heading)
+                Text("— \(heading)")
                     .font(.callout)
-                    .foregroundStyle(.secondary.opacity(0.8))
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(.vertical, 4)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
-                phase = .pi
+    }
+}
+
+private struct ShimmerTextModifier: ViewModifier {
+    @State private var phase: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(
+                GeometryReader { geometry in
+                    let shimmerWidth: CGFloat = 60
+
+                    LinearGradient(
+                        gradient: Gradient(colors: [
+                            .clear,
+                            Color.white.opacity(0.6),
+                            .clear
+                        ]),
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: shimmerWidth)
+                    .offset(x: phase * (geometry.size.width + shimmerWidth) - shimmerWidth / 2)
+                    .blendMode(.softLight)
+                }
+            )
+            .clipped()
+            .onAppear {
+                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                    phase = 1
+                }
             }
-        }
+            .onDisappear {
+                phase = 0
+            }
     }
 }
