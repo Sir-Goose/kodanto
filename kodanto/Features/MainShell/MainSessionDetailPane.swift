@@ -207,7 +207,8 @@ struct MainSessionDetailPane: View {
     }
 
     private var transcriptTurns: some View {
-        ForEach(selectedSessionTurns) { turn in
+        let turns = selectedSessionTurns
+        return ForEach(turns) { turn in
             TranscriptTurnView(
                 turn: turn,
                 worktreeRoot: selectedProject?.worktree,
@@ -217,7 +218,8 @@ struct MainSessionDetailPane: View {
                 navigateToSession: { target in
                     model.selectSession(target.sessionID, in: target.projectID)
                 },
-                disclosureStore: transcriptDisclosureStore
+                disclosureStore: transcriptDisclosureStore,
+                isThinking: isSelectedSessionRunning && turn.id == turns.last?.id
             )
         }
     }

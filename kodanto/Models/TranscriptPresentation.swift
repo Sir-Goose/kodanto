@@ -12,6 +12,10 @@ struct TranscriptTurn: Identifiable, Hashable {
         user?.id ?? assistantMessages.first?.id ?? "transcript-turn"
     }
 
+    var lastReasoningHeading: String? {
+        assistantMessages.flatMap(\.parts).compactMap(\.reasoningHeading).last
+    }
+
     init(user: OpenCodeMessageEnvelope?, assistantMessages: [OpenCodeMessageEnvelope]) {
         self.user = user
         self.assistantMessages = assistantMessages
@@ -151,8 +155,8 @@ extension OpenCodePart {
             return false
         case .text(let value):
             return !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .reasoning(let value):
-            return !value.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .reasoning:
+            return false
         case .tool(let tool):
             if transcriptHiddenToolNames.contains(tool.tool) {
                 return false

@@ -8,6 +8,7 @@ struct TranscriptTurnView: View {
     let resolveTaskTarget: (String) -> KodantoAppModel.SessionNavigationTarget?
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Bindable var disclosureStore: TranscriptDisclosureStore
+    var isThinking: Bool = false
     @State private var isAssistantHovered = false
 
     var body: some View {
@@ -21,7 +22,7 @@ struct TranscriptTurnView: View {
             }
 
             let groups = turn.assistantPartGroups
-            if !groups.isEmpty {
+            if !groups.isEmpty || isThinking {
                 VStack(alignment: .leading, spacing: 6) {
                     VStack(alignment: .leading, spacing: 10) {
                         if turn.user == nil {
@@ -38,6 +39,10 @@ struct TranscriptTurnView: View {
                                 navigateToSession: navigateToSession,
                                 disclosureStore: disclosureStore
                             )
+                        }
+
+                        if isThinking {
+                            ThinkingIndicatorView(heading: turn.lastReasoningHeading)
                         }
                     }
                     .padding(.leading, turn.user == nil ? 0 : 12)

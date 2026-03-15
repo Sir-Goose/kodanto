@@ -147,3 +147,35 @@ private struct ContextToolItem: View {
         }
     }
 }
+
+struct ThinkingIndicatorView: View {
+    let heading: String?
+
+    @State private var phase: CGFloat = 0
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.accentColor)
+                .frame(width: 6, height: 6)
+                .opacity(0.3 + 0.7 * (1.0 + Foundation.sin(phase)) / 2.0)
+
+            Text("Thinking...")
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            if let heading {
+                Text(heading)
+                    .font(.callout)
+                    .foregroundStyle(.secondary.opacity(0.8))
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .padding(.vertical, 4)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) {
+                phase = .pi
+            }
+        }
+    }
+}

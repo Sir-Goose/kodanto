@@ -871,6 +871,17 @@ enum OpenCodePart: Decodable, Identifiable, Hashable {
         }
     }
 
+    var reasoningHeading: String? {
+        guard case .reasoning(let value) = self else { return nil }
+        let text = value.text
+        if let start = text.range(of: "**"),
+           let end = text[start.upperBound...].range(of: "**") {
+            let heading = text[start.upperBound..<end.lowerBound]
+            return String(heading).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return nil
+    }
+
     var sessionID: String {
         switch self {
         case .text(let value):
