@@ -182,33 +182,35 @@ private struct ShimmerTextModifier: ViewModifier {
     @State private var phase: CGFloat = 0
 
     func body(content: Content) -> some View {
-        content
-            .overlay(
-                GeometryReader { geometry in
-                    let shimmerWidth: CGFloat = 60
+        GeometryReader { geometry in
+            let shimmerWidth: CGFloat = 60
 
-                    LinearGradient(
-                        gradient: Gradient(colors: [
-                            .clear,
-                            Color.white.opacity(0.6),
-                            .clear
-                        ]),
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                    .frame(width: shimmerWidth)
-                    .offset(x: phase * (geometry.size.width + shimmerWidth) - shimmerWidth / 2)
-                    .blendMode(.softLight)
-                }
-            )
-            .clipped()
-            .onAppear {
-                withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
-                    phase = 1
-                }
+            ZStack {
+                content
+
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        .clear,
+                        Color.white.opacity(0.6),
+                        .clear
+                    ]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: shimmerWidth)
+                .offset(x: phase * (geometry.size.width + shimmerWidth) - shimmerWidth / 2)
+                .blendMode(.softLight)
+                .mask(content)
             }
-            .onDisappear {
-                phase = 0
+        }
+        .frame(height: nil, alignment: .leading)
+        .onAppear {
+            withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) {
+                phase = 1
             }
+        }
+        .onDisappear {
+            phase = 0
+        }
     }
 }
