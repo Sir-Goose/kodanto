@@ -6,9 +6,8 @@ struct MainSessionDetailPane: View {
     let splitViewVisibility: NavigationSplitViewVisibility
 
     @State private var promptEditorHeight: CGFloat = 0
-    @State private var pendingInitialBottomSessionID: OpenCodeSession.ID?
     @State private var transcriptDisclosureStore = TranscriptDisclosureStore()
-    @State private var userIsAtBottom: Bool = true
+    @State private var userScrolledUp = false
 
     private let transcriptScrollTarget = "transcript-bottom"
 
@@ -91,9 +90,7 @@ struct MainSessionDetailPane: View {
             model.ensureTerminalConnectedIfNeeded()
         }
         .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
-            if isOpen {
-                model.ensureTerminalConnectedIfNeeded()
-            }
+            if isOpen { model.ensureTerminalConnectedIfNeeded() }
         }
     }
 
@@ -176,31 +173,28 @@ struct MainSessionDetailPane: View {
                 .padding()
                 .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .onScrollGeometryChange(for: Bool.self) { geometry in
-                    let visibleRect = geometry.visibleRect
-                    let distanceFromBottom = geometry.contentSize.height - visibleRect.maxY
-                    return distanceFromBottom < 50
-                } action: { _, isAtBottom in
-                    userIsAtBottom = isAtBottom
-                }
             }
             .defaultScrollAnchor(.bottom)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .onAppear {
-                pendingInitialBottomSessionID = selectedSessionID
-                jumpTranscriptToBottom(using: proxy)
-            }
-            .onChange(of: selectedSessionID) { _, sessionID in
-                pendingInitialBottomSessionID = sessionID
-                transcriptDisclosureStore.reset()
-                jumpTranscriptToBottom(using: proxy)
-            }
-            .onChange(of: isSelectedSessionRunning) { oldValue, newValue in
-                if newValue && userIsAtBottom {
-                    scrollTranscriptToBottom(using: proxy)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                let distanceFromBottom = geometry.contentSize.height - geometry.visibleRect.maxY
+                return distanceFromBottom < 50
+            } action: { wasNearBottom, isNearBottom in
+                if wasNearBottom && !isNearBottom {
+                    userScrolledUp = true
+                } else if isNearBottom {
+                    userScrolledUp = false
                 }
-                if oldValue && !newValue && userIsAtBottom {
-                    scrollTranscriptToBottom(using: proxy)
+            }
+            .onChange(of: selectedSessionID) { _, _ in
+                userScrolledUp = false
+                transcriptDisclosureStore.reset()
+            }
+            .onChange(of: isSelectedSessionRunning) { _, isRunning in
+                if isRunning && !userScrolledUp {
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
+                    }
                 }
             }
         }
@@ -335,43 +329,5 @@ struct MainSessionDetailPane: View {
         .padding(.leading, splitViewVisibility == .detailOnly ? Self.collapsedHeaderLeadingInset : 0)
         .background(.thinMaterial)
         .animation(.easeInOut(duration: 0.16), value: splitViewVisibility)
-    }
-
-    private func scrollTranscriptToBottomIfNeeded(using proxy: ScrollViewProxy) {
-        guard isSelectedSessionRunning && userIsAtBottom else { return }
-        scrollTranscriptToBottom(using: proxy)
-    }
-
-    private func handleTranscriptChange(using proxy: ScrollViewProxy) {
-        guard let selectedSessionID else { return }
-
-        if pendingInitialBottomSessionID == selectedSessionID {
-            jumpTranscriptToBottom(using: proxy)
-
-            if transcriptHasVisibleContent {
-                pendingInitialBottomSessionID = nil
-            }
-            return
-        }
-
-        scrollTranscriptToBottomIfNeeded(using: proxy)
-    }
-
-    private var transcriptHasVisibleContent: Bool {
-        !selectedSessionMessages.isEmpty || !sessionTodos.isEmpty || !permissions.isEmpty || !questions.isEmpty
-    }
-
-    private func jumpTranscriptToBottom(using proxy: ScrollViewProxy) {
-        let transaction = Transaction(animation: nil)
-
-        DispatchQueue.main.async {
-            withTransaction(transaction) {
-                proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
-            }
-        }
-    }
-
-    private func scrollTranscriptToBottom(using proxy: ScrollViewProxy) {
-        jumpTranscriptToBottom(using: proxy)
     }
 }
