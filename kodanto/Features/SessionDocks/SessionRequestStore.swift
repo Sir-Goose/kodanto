@@ -43,12 +43,20 @@ final class SessionRequestStore {
     }
 
     var isPermissionAutoAcceptEnabled: Bool {
-        guard let key = selectedPermissionAutoAcceptKey else { return false }
-        return permissionAutoAcceptValues[key] ?? false
+        if let sessionID = selectedSessionID,
+           let directory = selectedDirectory {
+            let sessionKey = PermissionAutoAcceptStore.makeKey(sessionID: sessionID, directory: directory)
+            if let value = permissionAutoAcceptValues[sessionKey] {
+                return value
+            }
+        }
+        guard let directory = selectedDirectory else { return false }
+        let directoryKey = PermissionAutoAcceptStore.makeDirectoryKey(directory: directory)
+        return permissionAutoAcceptValues[directoryKey] ?? false
     }
 
     var canTogglePermissionAutoAccept: Bool {
-        selectedDirectory != nil && selectedSessionID != nil
+        selectedDirectory != nil
     }
 
     func updateSelection(sessionID: String?, directory: String?) {
@@ -75,7 +83,13 @@ final class SessionRequestStore {
     }
 
     func setPermissionAutoAccept(_ enabled: Bool) {
-        guard let key = selectedPermissionAutoAcceptKey else { return }
+        guard let directory = selectedDirectory else { return }
+        let key: String
+        if let sessionID = selectedSessionID {
+            key = PermissionAutoAcceptStore.makeKey(sessionID: sessionID, directory: directory)
+        } else {
+            key = PermissionAutoAcceptStore.makeDirectoryKey(directory: directory)
+        }
         permissionAutoAcceptValues[key] = enabled
         permissionAutoAcceptStore.save(permissionAutoAcceptValues)
     }

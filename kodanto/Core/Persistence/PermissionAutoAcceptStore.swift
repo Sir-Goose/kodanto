@@ -24,4 +24,8 @@ struct PermissionAutoAcceptStore: PermissionAutoAcceptStoring {
     static func makeKey(sessionID: String, directory: String) -> String {
         "\(directory)|\(sessionID)"
     }
+
+    static func makeDirectoryKey(directory: String) -> String {
+        "\(directory)|*"
+    }
 }
