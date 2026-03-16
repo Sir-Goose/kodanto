@@ -333,6 +333,10 @@ private struct ShellTranscriptPresentation {
         formattedTranscript(output: previewOutput)
     }
 
+    var commandOnlyTranscript: String? {
+        commandLine
+    }
+
     var lineCountBadge: String? {
         guard outputLineCount > 0 else { return nil }
         let noun = outputLineCount == 1 ? "line" : "lines"
@@ -451,6 +455,10 @@ extension OpenCodePart.Tool {
 
     var shellPreviewTranscript: String? {
         shellPresentation.previewTranscript
+    }
+
+    var shellCommandOnlyTranscript: String? {
+        shellPresentation.commandOnlyTranscript
     }
 
     var shellOutputLineCount: Int {

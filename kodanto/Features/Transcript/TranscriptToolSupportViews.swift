@@ -193,7 +193,17 @@ struct ShellTranscriptBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let transcript = displayedTranscript {
+            if let command = tool.shellCommandOnlyTranscript {
+                Text(verbatim: command)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.leading)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
+            if isExpanded, let transcript = tool.shellTranscript {
                 ScrollView([.horizontal, .vertical], showsIndicators: true) {
                     Text(verbatim: transcript)
                         .font(.system(.caption, design: .monospaced))
@@ -204,12 +214,12 @@ struct ShellTranscriptBlock: View {
                         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(maxHeight: maxHeight)
+                .frame(maxHeight: 360)
                 .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
 
-            if tool.shellHasHiddenOutput, !tool.isPendingOrRunning {
-                Button(isExpanded ? "Show less" : expandLabel) {
+            if hasOutput, !tool.isPendingOrRunning {
+                Button(isExpanded ? "Hide output" : expandLabel) {
                     isExpanded.toggle()
                 }
                 .buttonStyle(.plain)
@@ -219,24 +229,18 @@ struct ShellTranscriptBlock: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var displayedTranscript: String? {
-        if isExpanded || tool.isPendingOrRunning {
-            return tool.shellTranscript
-        }
-        return tool.shellPreviewTranscript
+    private var hasOutput: Bool {
+        guard let output = tool.shellOutput, !output.isEmpty else { return false }
+        return true
     }
 
     private var expandLabel: String {
         let lineCount = tool.shellOutputLineCount
-        let noun = lineCount == 1 ? "line" : "lines"
-        return "Show all \(lineCount) \(noun)"
-    }
-
-    private var maxHeight: CGFloat? {
-        if isExpanded || tool.isPendingOrRunning {
-            return 360
+        if lineCount == 0 {
+            return "Show output"
         }
-        return 220
+        let noun = lineCount == 1 ? "line" : "lines"
+        return "Show \(lineCount) \(noun)"
     }
 }
 
