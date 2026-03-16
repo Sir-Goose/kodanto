@@ -728,6 +728,22 @@ final class KodantoAppModel {
         }
     }
 
+    func abortSession() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.abortSession(sessionID: session.id, directory: project.worktree)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
     func selectSession(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
         guard selectedProfile != nil else { return }
         let didSwitch = workspaceStore.selectSession(sessionID, in: projectID)

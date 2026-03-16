@@ -428,24 +428,16 @@ struct ModelPickerPopover: View {
         })?.id
     }
 
-    private var idealHeight: CGFloat {
-        let visibleModelCount = groups.first(where: { $0.id == expandedProviderID })?.models.count ?? 0
-        let estimatedHeight = CGFloat(groups.count * 36) + CGFloat(visibleModelCount * 34) + 32
-        return min(max(estimatedHeight, 120), 320)
-    }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         Button {
-                            withAnimation(.easeInOut(duration: 0.14)) {
-                                if expandedProviderID == group.id {
-                                    expandedProviderID = nil
-                                } else {
-                                    expandedProviderID = group.id
-                                }
+                            if expandedProviderID == group.id {
+                                expandedProviderID = nil
+                            } else {
+                                expandedProviderID = group.id
                             }
                         } label: {
                             ModelPickerProviderRow(
@@ -471,7 +463,6 @@ struct ModelPickerPopover: View {
                                 }
                             }
                             .padding(.leading, 18)
-                            .transition(.opacity)
                         }
                     }
                 }
@@ -479,7 +470,7 @@ struct ModelPickerPopover: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 300, height: idealHeight)
+        .frame(width: 300, height: 320)
         .accessibilityIdentifier("model-picker-popover")
     }
 }

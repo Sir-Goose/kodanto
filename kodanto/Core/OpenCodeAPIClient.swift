@@ -182,6 +182,14 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func abortSession(sessionID: String, directory: String) async throws {
+        try await requestNoContent(
+            path: "/session/\(sessionID)/abort",
+            method: "POST",
+            directory: directory
+        )
+    }
+
     func replyToPermission(requestID: String, directory: String, reply: String) async throws {
         try await requestNoContent(
             path: "/permission/\(requestID)/reply",

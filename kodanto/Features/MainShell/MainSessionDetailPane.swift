@@ -257,17 +257,21 @@ struct MainSessionDetailPane: View {
                 ComposerControlsRow(model: model)
 
                 Button {
-                    model.sendPrompt()
+                    if isSelectedSessionRunning {
+                        model.abortSession()
+                    } else {
+                        model.sendPrompt()
+                    }
                 } label: {
-                    Image(systemName: "paperplane.fill")
+                    Image(systemName: isSelectedSessionRunning ? "stop.fill" : "paperplane.fill")
                         .font(.system(size: 14, weight: .semibold))
                         .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.borderedProminent)
                 .buttonBorderShape(.circle)
                 .controlSize(.regular)
-                .disabled(!model.canSendPrompt)
-                .help("Send")
+                .disabled(!isSelectedSessionRunning && !model.canSendPrompt)
+                .help(isSelectedSessionRunning ? "Stop" : "Send")
             }
         }
         .padding(Self.composerInnerPadding)
