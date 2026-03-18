@@ -136,6 +136,13 @@ struct OpenCodeConfigProviders: Decodable {
         let id: String?
         let name: String?
         let variants: [String: JSONValue]?
+        let limit: ModelLimit?
+    }
+
+    struct ModelLimit: Decodable {
+        let context: Int
+        let input: Int?
+        let output: Int
     }
 }
 
@@ -158,6 +165,7 @@ struct OpenCodeModelOption: Identifiable, Hashable {
     let modelID: String
     let modelName: String
     let variants: [String]
+    let contextLimit: Int?
 
     var id: String { "\(providerID)/\(modelID)" }
 

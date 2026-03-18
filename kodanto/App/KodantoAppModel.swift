@@ -217,6 +217,13 @@ final class KodantoAppModel {
         composerStore.selectedPromptAgent
     }
 
+    var sessionContextUsage: SessionContextUsage? {
+        SessionContextUsage.compute(
+            messages: sessionDetailStore.selectedSessionMessages,
+            modelContextLimit: composerStore.selectedModel?.contextLimit
+        )
+    }
+
     var canCreateSession: Bool {
         selectedProject != nil && selectedProfile != nil
     }

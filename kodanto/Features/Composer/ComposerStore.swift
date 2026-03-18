@@ -196,7 +196,8 @@ final class ComposerStore {
                             providerName: provider.name,
                             modelID: resolvedModelID,
                             modelName: (model.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? resolvedModelID,
-                            variants: OpenCodeModelOption.sortedVariantNames(model.variants.map { Array($0.keys) } ?? [])
+                            variants: OpenCodeModelOption.sortedVariantNames(model.variants.map { Array($0.keys) } ?? []),
+                            contextLimit: model.limit?.context
                         )
                     }
                     .sorted {

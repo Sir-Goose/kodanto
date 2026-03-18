@@ -50,9 +50,46 @@ struct MainView: View {
 
     private var titlebarControls: some View {
         HStack(spacing: 8) {
+            if let usage = model.sessionContextUsage {
+                contextUsageView(usage)
+            }
             terminalToggleButton
             connectionStatusButton
         }
+    }
+
+    private func contextUsageView(_ usage: SessionContextUsage) -> some View {
+        let tokensText: String
+        let tokens = usage.tokenTotal
+        if tokens >= 1_000_000 {
+            let megatokens = Double(tokens) / 1_000_000.0
+            tokensText = megatokens >= 10 ? "\(Int(megatokens))M" : String(format: "%.1fM", megatokens)
+        } else if tokens >= 1000 {
+            let kilotokens = Double(tokens) / 1000.0
+            tokensText = kilotokens >= 10 ? "\(Int(kilotokens))k" : String(format: "%.1fk", kilotokens)
+        } else {
+            tokensText = "\(tokens)"
+        }
+        
+        let costText: String
+        if usage.totalCost >= 0.01 {
+            costText = String(format: "$%.2f", usage.totalCost)
+        } else {
+            costText = "$0.00"
+        }
+
+        return HStack(spacing: 4) {
+            if let percent = usage.usagePercent {
+                Text("\(tokensText) \(percent)%")
+            } else {
+                Text(tokensText)
+            }
+            Text("(\(costText))")
+        }
+        .font(.callout)
+        .foregroundStyle(.secondary)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
     }
 
     private var terminalToggleButton: some View {
