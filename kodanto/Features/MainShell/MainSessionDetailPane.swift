@@ -8,8 +8,7 @@ struct MainSessionDetailPane: View {
     @State private var promptEditorHeight: CGFloat = 0
     @State private var transcriptDisclosureStore = TranscriptDisclosureStore()
     @State private var userScrolledUp = false
-
-    private let transcriptScrollTarget = "transcript-bottom"
+    @State private var scrollPosition = ScrollPosition(edge: .bottom)
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -47,10 +46,6 @@ struct MainSessionDetailPane: View {
 
     private var selectedSessionTurns: [TranscriptTurn] {
         model.sessionDetailStore.selectedSessionTurns
-    }
-
-    private var selectedSessionTranscriptRevision: Int {
-        model.sessionDetailStore.selectedSessionTranscriptRevision
     }
 
     private var sessionTodos: [OpenCodeTodo] {
@@ -167,13 +162,14 @@ struct MainSessionDetailPane: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     transcriptTurns
-                    transcriptBottomAnchor
                 }
-                .id("transcript-\(selectedSessionID ?? "none")-\(selectedSessionTranscriptRevision)")
+                .scrollTargetLayout()
+                .id("transcript-\(selectedSessionID ?? "none")")
                 .padding()
                 .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
             }
+            .scrollPosition($scrollPosition)
             .defaultScrollAnchor(.bottom)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -189,12 +185,11 @@ struct MainSessionDetailPane: View {
             .onChange(of: selectedSessionID) { _, _ in
                 userScrolledUp = false
                 transcriptDisclosureStore.reset()
+                scrollPosition.scrollTo(edge: .bottom)
             }
             .onChange(of: isSelectedSessionRunning) { _, isRunning in
                 if isRunning && !userScrolledUp {
-                    DispatchQueue.main.async {
-                        proxy.scrollTo(transcriptScrollTarget, anchor: .bottom)
-                    }
+                    scrollPosition.scrollTo(edge: .bottom)
                 }
             }
         }
@@ -216,12 +211,6 @@ struct MainSessionDetailPane: View {
                 isThinking: isSelectedSessionRunning && turn.id == turns.last?.id
             )
         }
-    }
-
-    private var transcriptBottomAnchor: some View {
-        Color.clear
-            .frame(height: 1)
-            .id(transcriptScrollTarget)
     }
 
     private func composer(maxHeight: CGFloat) -> some View {
