@@ -193,9 +193,18 @@ final class WorkspaceStore {
         for project: OpenCodeProject
     ) {
         let previousSessions = sessionsByDirectory[project.worktree] ?? []
+        let existingChildSessions = previousSessions.filter { $0.parentID != nil }
+
         var sortedSessions = loadedSessions
             .filter { !$0.isArchived }
             .sorted { $0.time.updated > $1.time.updated }
+
+        // Preserve existing child sessions that might not be in the loaded list
+        let loadedSessionIDs = Set(sortedSessions.map(\.id))
+        for childSession in existingChildSessions where !loadedSessionIDs.contains(childSession.id) {
+            sortedSessions.append(childSession)
+        }
+        sortedSessions.sort { $0.time.updated > $1.time.updated }
 
         if selectedProjectID == project.id,
            let selectedSessionID,
