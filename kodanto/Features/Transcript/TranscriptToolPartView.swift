@@ -227,13 +227,12 @@ struct ToolPartView: View {
     }
 
     private var taskTool: some View {
-        let target = tool.childSessionID.flatMap(resolveTaskTarget)
         let subtitle: ToolSubtitle?
-        if let description = tool.subtitleText, !description.isEmpty {
-            if let target {
-                subtitle = .action(description) { navigateToSession(target) }
-            } else {
-                subtitle = .text(description)
+        if let description = tool.subtitleText, !description.isEmpty, let childSessionID = tool.childSessionID {
+            subtitle = .action(description) { [resolveTaskTarget, navigateToSession] in
+                if let target = resolveTaskTarget(childSessionID) {
+                    navigateToSession(target)
+                }
             }
         } else {
             subtitle = nil
