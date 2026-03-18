@@ -61,7 +61,8 @@ final class WorkspaceStore {
     }
 
     func sessions(for project: OpenCodeProject) -> [OpenCodeSession] {
-        sessionsByDirectory[project.worktree] ?? []
+        (sessionsByDirectory[project.worktree] ?? [])
+            .filter { $0.parentID == nil }
     }
 
     func sessionSidebarIndicator(for session: OpenCodeSession, in project: OpenCodeProject) -> SessionSidebarIndicatorState {
@@ -127,6 +128,11 @@ final class WorkspaceStore {
         ) else { return nil }
 
         return KodantoSessionNavigationTarget(projectID: location.projectID, sessionID: location.sessionID)
+    }
+
+    func parentSessionTarget(for session: OpenCodeSession) -> KodantoSessionNavigationTarget? {
+        guard let parentID = session.parentID else { return nil }
+        return loadedSessionNavigationTarget(for: parentID)
     }
 
     func moveProjects(fromOffsets source: IndexSet, toOffset destination: Int, profileID: UUID?) {

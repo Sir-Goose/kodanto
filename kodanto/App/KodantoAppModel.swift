@@ -548,6 +548,10 @@ final class KodantoAppModel {
         workspaceStore.sessionSidebarIndicator(for: session, in: project)
     }
 
+    func parentSessionTarget(for session: OpenCodeSession) -> KodantoSessionNavigationTarget? {
+        workspaceStore.parentSessionTarget(for: session)
+    }
+
     func canMarkSessionUnread(sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) -> Bool {
         workspaceStore.canMarkSessionUnread(sessionID, in: projectID)
     }

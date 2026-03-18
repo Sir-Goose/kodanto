@@ -301,16 +301,31 @@ struct MainSessionDetailPane: View {
     }
 
     private func header(for session: OpenCodeSession) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(session.title)
-                .font(.title2.weight(.semibold))
-            Text(session.directory)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            if let shareURL = session.share?.url {
-                Label(shareURL, systemImage: "link")
-                    .font(.caption)
+        HStack(alignment: .top, spacing: 12) {
+            if let target = model.parentSessionTarget(for: session) {
+                Button {
+                    model.selectSession(target.sessionID, in: target.projectID)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Go to parent session")
+                .padding(.top, 2)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(session.title)
+                    .font(.title2.weight(.semibold))
+                Text(session.directory)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
+                if let shareURL = session.share?.url {
+                    Label(shareURL, systemImage: "link")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
