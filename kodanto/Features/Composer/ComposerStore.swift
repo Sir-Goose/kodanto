@@ -17,6 +17,7 @@ final class ComposerStore {
     var isLoadingModels = false
     var modelLoadError: String?
     var draftPrompt = ""
+    var currentPlaceholder: String = PlaceholderProvider.randomPlaceholder()
 
     private let modelSelectionStore: ModelSelectionStoring
     private let modelVariantSelectionStore: ModelVariantSelectionStoring
@@ -84,6 +85,10 @@ final class ComposerStore {
         lastSyncedAgentMessageID = nil
         isLoadingModels = false
         modelLoadError = nil
+    }
+
+    func refreshPlaceholder() {
+        currentPlaceholder = PlaceholderProvider.randomPlaceholder(excluding: currentPlaceholder)
     }
 
     func selectModel(_ modelID: String) {

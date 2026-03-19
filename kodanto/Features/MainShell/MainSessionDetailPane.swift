@@ -87,6 +87,12 @@ struct MainSessionDetailPane: View {
         .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
             if isOpen { model.ensureTerminalConnectedIfNeeded() }
         }
+        .onChange(of: model.workspaceStore.selectedProjectID) { _, _ in
+            model.composerStore.refreshPlaceholder()
+        }
+        .onChange(of: selectedSessionID) { _, _ in
+            model.composerStore.refreshPlaceholder()
+        }
     }
 
     @ViewBuilder
@@ -231,7 +237,7 @@ struct MainSessionDetailPane: View {
                 .frame(height: resolvedPromptHeight)
 
                 if model.draftPrompt.isEmpty {
-                    Text("Write a prompt...")
+                    Text(model.composerStore.currentPlaceholder)
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, Self.composerHorizontalPadding)
