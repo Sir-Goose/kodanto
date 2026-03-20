@@ -182,6 +182,14 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func disposeInstance(directory: String?) async throws {
+        try await requestNoContent(
+            path: "/instance/dispose",
+            method: "POST",
+            directory: directory
+        )
+    }
+
     func abortSession(sessionID: String, directory: String) async throws {
         try await requestNoContent(
             path: "/session/\(sessionID)/abort",

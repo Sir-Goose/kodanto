@@ -46,6 +46,7 @@ protocol OpenCodeAPIService {
         agent: String?,
         variant: String?
     ) async throws
+    func disposeInstance(directory: String?) async throws
     func abortSession(sessionID: String, directory: String) async throws
     func replyToPermission(requestID: String, directory: String, reply: String) async throws
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws

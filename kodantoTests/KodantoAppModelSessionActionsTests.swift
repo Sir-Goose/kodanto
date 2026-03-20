@@ -410,6 +410,8 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
         )
         messageEnvelopesBySessionID[sessionID, default: []].append(envelope)
     }
+    func disposeInstance(directory: String?) async throws { fatalError("unused") }
+    func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }

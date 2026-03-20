@@ -516,6 +516,8 @@ private final class MockTerminalAPIService: OpenCodeAPIService {
         agent: String?,
         variant: String?
     ) async throws { fatalError("unused") }
+    func disposeInstance(directory: String?) async throws { fatalError("unused") }
+    func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }

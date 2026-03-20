@@ -547,6 +547,23 @@ final class KodantoAppModel {
         }
     }
 
+    func refreshModelCatalogForSelectedProject() {
+        guard connectionState.isConnected,
+              let profile = selectedProfile,
+              let directory = selectedProject?.worktree
+        else { return }
+
+        let client = dependencies.apiFactory.makeService(profile: profile)
+
+        Task {
+            do {
+                try await composerStore.refreshModelCatalog(using: client, directory: directory)
+            } catch {
+                composerStore.modelLoadError = error.localizedDescription
+            }
+        }
+    }
+
     func sessions(for project: OpenCodeProject) -> [OpenCodeSession] {
         workspaceStore.sessions(for: project)
     }
@@ -883,7 +900,10 @@ final class KodantoAppModel {
 
         if scope.includesModelCatalog {
             do {
-                try await composerStore.refreshModelCatalog(using: client)
+                try await composerStore.refreshModelCatalog(
+                    using: client,
+                    directory: selectedProject?.worktree
+                )
             } catch {
                 composerStore.modelLoadError = error.localizedDescription
             }

@@ -102,6 +102,64 @@ final class ComposerAgentSelectionTests: XCTestCase {
         }
     }
 
+    func testRefreshModelCatalogDisposesSelectedInstanceBeforeLoadingProviders() async throws {
+        try await runOnMainActor {
+            let store = self.makeStore()
+            let service = ComposerAgentMockAPIService()
+
+            try await store.refreshModelCatalog(using: service, directory: "/tmp/project-1")
+
+            XCTAssertEqual(service.disposeInstanceCalls, ["/tmp/project-1"])
+            XCTAssertEqual(service.configRequests, ["/tmp/project-1"])
+            XCTAssertEqual(service.configProvidersRequests, ["/tmp/project-1"])
+        }
+    }
+
+    func testRefreshModelCatalogPicksUpModelsAddedAfterInstanceDispose() async throws {
+        try await runOnMainActor {
+            let store = self.makeStore()
+            let service = ComposerAgentMockAPIService()
+            service.configProvidersResponse = OpenCodeConfigProviders(
+                providers: [
+                    .init(
+                        id: "opencode-go",
+                        name: "OpenCode Go",
+                        models: [
+                            "minimax-m2.5": .init(id: "minimax-m2.5", name: "MiniMax M2.5", status: "active", cost: nil, variants: nil, limit: nil)
+                        ]
+                    )
+                ],
+                default: ["opencode-go": "minimax-m2.5"]
+            )
+            service.onDisposeInstance = {
+                service.configProvidersResponse = OpenCodeConfigProviders(
+                    providers: [
+                        .init(
+                            id: "opencode-go",
+                            name: "OpenCode Go",
+                            models: [
+                                "minimax-m2.5": .init(id: "minimax-m2.5", name: "MiniMax M2.5", status: "active", cost: nil, variants: nil, limit: nil),
+                                "minimax-m2.7": .init(id: "minimax-m2.7", name: "MiniMax M2.7", status: "active", cost: nil, variants: nil, limit: nil)
+                            ]
+                        )
+                    ],
+                    default: ["opencode-go": "minimax-m2.7"]
+                )
+            }
+
+            try await store.refreshModelCatalog(using: service, directory: "/tmp/project-1")
+
+            let opencodeGoModels = store.availableModelGroups
+                .first(where: { $0.providerID == "opencode-go" })?
+                .models
+                .map(\.modelID)
+
+            XCTAssertEqual(service.disposeInstanceCalls, ["/tmp/project-1"])
+            XCTAssertEqual(opencodeGoModels, ["minimax-m2.5", "minimax-m2.7"])
+            XCTAssertEqual(store.selectedModelID, "opencode-go/minimax-m2.7")
+        }
+    }
+
     func testSyncSelectedAgentUsesLatestUserMessageAgentWhenAvailable() async {
         await runOnMainActor {
             let store = self.makeStore()
@@ -521,19 +579,29 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
                 id: "provider-1",
                 name: "Provider 1",
                 models: [
-                    "model-1": .init(id: "model-1", name: "Model 1", variants: nil)
+                    "model-1": .init(id: "model-1", name: "Model 1", status: "active", cost: nil, variants: nil, limit: nil)
                 ]
             )
         ],
         default: ["provider-1": "model-1"]
     )
     var agentsResponse: [OpenCodeAgent] = []
+    var onDisposeInstance: (() -> Void)?
+    private(set) var disposeInstanceCalls: [String?] = []
+    private(set) var configRequests: [String?] = []
+    private(set) var configProvidersRequests: [String?] = []
     private(set) var promptCalls: [PromptCall] = []
 
     func health() async throws -> OpenCodeHealth { fatalError("unused") }
     func pathInfo(directory: String?) async throws -> OpenCodePathInfo { fatalError("unused") }
-    func config(directory: String?) async throws -> OpenCodeConfig { configResponse }
-    func configProviders(directory: String?) async throws -> OpenCodeConfigProviders { configProvidersResponse }
+    func config(directory: String?) async throws -> OpenCodeConfig {
+        configRequests.append(directory)
+        return configResponse
+    }
+    func configProviders(directory: String?) async throws -> OpenCodeConfigProviders {
+        configProvidersRequests.append(directory)
+        return configProvidersResponse
+    }
     func agents() async throws -> [OpenCodeAgent] { agentsResponse }
     func projects() async throws -> [OpenCodeProject] { fatalError("unused") }
     func sessions(directory: String) async throws -> [OpenCodeSession] { fatalError("unused") }
@@ -543,6 +611,7 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     func questions(directory: String) async throws -> [OpenCodeQuestionRequest] { fatalError("unused") }
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
+    func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
     func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
     func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
     func createPTY(
@@ -577,6 +646,10 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     ) async throws {
         promptCalls.append(.init(sessionID: sessionID, directory: directory, text: text, model: model, agent: agent, variant: variant))
     }
+    func disposeInstance(directory: String?) async throws {
+        disposeInstanceCalls.append(directory)
+        onDisposeInstance?()
+    }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }
@@ -598,6 +671,7 @@ private final class SessionUnreadMockAPIService: OpenCodeAPIService {
     func questions(directory: String) async throws -> [OpenCodeQuestionRequest] { fatalError("unused") }
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
+    func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
     func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
     func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
     func createPTY(
@@ -633,6 +707,7 @@ private final class SessionUnreadMockAPIService: OpenCodeAPIService {
         agent: String?,
         variant: String?
     ) async throws { fatalError("unused") }
+    func disposeInstance(directory: String?) async throws { fatalError("unused") }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }

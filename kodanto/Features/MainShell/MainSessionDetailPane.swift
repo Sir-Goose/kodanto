@@ -83,6 +83,7 @@ struct MainSessionDetailPane: View {
         }
         .onChange(of: selectedProject?.worktree) { _, _ in
             model.ensureTerminalConnectedIfNeeded()
+            model.refreshModelCatalogForSelectedProject()
         }
         .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
             if isOpen { model.ensureTerminalConnectedIfNeeded() }

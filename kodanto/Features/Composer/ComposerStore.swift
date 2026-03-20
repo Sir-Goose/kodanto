@@ -144,13 +144,21 @@ final class ComposerStore {
         lastSyncedAgentMessageID = latestUser.id
     }
 
-    func refreshModelCatalog(using client: OpenCodeAPIService) async throws {
+    func refreshModelCatalog(using client: OpenCodeAPIService, directory: String? = nil) async throws {
         isLoadingModels = true
         modelLoadError = nil
         defer { isLoadingModels = false }
 
-        async let configTask = client.config(directory: nil)
-        async let providersTask = client.configProviders(directory: nil)
+        if let directory, !directory.isEmpty {
+            do {
+                try await client.disposeInstance(directory: directory)
+            } catch OpenCodeAPIError.serverError(let statusCode, _) where statusCode == 404 || statusCode == 405 {
+                // Older servers may not support explicit instance disposal.
+            }
+        }
+
+        async let configTask = client.config(directory: directory)
+        async let providersTask = client.configProviders(directory: directory)
 
         let config = try await configTask
         let providersResponse = try await providersTask
