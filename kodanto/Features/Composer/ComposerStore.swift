@@ -154,6 +154,7 @@ final class ComposerStore {
 
         let config = try await configTask
         let providersResponse = try await providersTask
+
         applyModelCatalog(resolvedModelCatalog(config: config, providersResponse: providersResponse))
         let agents = (try? await client.agents()) ?? []
         applyAgentCatalog(agents.filter(\.isPrimaryVisible))
@@ -194,13 +195,15 @@ final class ComposerStore {
                 OpenCodeModelProviderGroup(
                     providerID: provider.id,
                     providerName: provider.name,
-                    models: provider.models.map { key, model in
+                    models: provider.models.compactMap { key, model in
+                        guard model.status != "deprecated" else { return nil }
                         let resolvedModelID = (model.id ?? key).trimmingCharacters(in: .whitespacesAndNewlines)
                         return OpenCodeModelOption(
                             providerID: provider.id,
                             providerName: provider.name,
                             modelID: resolvedModelID,
                             modelName: (model.name?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? resolvedModelID,
+                            status: model.status,
                             variants: OpenCodeModelOption.sortedVariantNames(model.variants.map { Array($0.keys) } ?? []),
                             contextLimit: model.limit?.context
                         )

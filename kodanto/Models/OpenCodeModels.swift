@@ -135,6 +135,8 @@ struct OpenCodeConfigProviders: Decodable {
     struct Model: Decodable {
         let id: String?
         let name: String?
+        let status: String?
+        let cost: ModelCost?
         let variants: [String: JSONValue]?
         let limit: ModelLimit?
     }
@@ -143,6 +145,11 @@ struct OpenCodeConfigProviders: Decodable {
         let context: Int
         let input: Int?
         let output: Int
+    }
+
+    struct ModelCost: Decodable {
+        let input: Double?
+        let output: Double?
     }
 }
 
@@ -164,10 +171,13 @@ struct OpenCodeModelOption: Identifiable, Hashable {
     let providerName: String
     let modelID: String
     let modelName: String
+    let status: String?
     let variants: [String]
     let contextLimit: Int?
 
     var id: String { "\(providerID)/\(modelID)" }
+
+    var isDeprecated: Bool { status == "deprecated" }
 
     static func sortedVariantNames(_ names: [String]) -> [String] {
         let preferredOrder = [
