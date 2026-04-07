@@ -296,7 +296,7 @@ struct ThinkingEffortPicker: View {
     @State private var isShowingPicker = false
 
     private var selectionLabel: String {
-        model.selectedPromptVariant ?? "Default"
+        model.selectedPromptVariant.map(OpenCodeModelOption.displayVariantName) ?? "Default"
     }
 
     private var hasVariants: Bool {
@@ -364,7 +364,7 @@ struct ThinkingEffortPicker: View {
                     Button {
                         onSelect(variant)
                     } label: {
-                        optionRow(variant, isSelected: selectedVariant == variant)
+                        optionRow(OpenCodeModelOption.displayVariantName(variant), isSelected: selectedVariant == variant)
                     }
                     .buttonStyle(.plain)
                 }

@@ -210,6 +210,20 @@ struct OpenCodeModelOption: Identifiable, Hashable {
             }
         }
     }
+
+    nonisolated static func displayVariantName(_ variant: String) -> String {
+        let trimmed = variant.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return variant }
+
+        if trimmed.caseInsensitiveCompare("xhigh") == .orderedSame {
+            return "Extra High"
+        }
+
+        let withSpaces = trimmed
+            .replacingOccurrences(of: "_", with: " ")
+            .replacingOccurrences(of: "-", with: " ")
+        return withSpaces.capitalized
+    }
 }
 
 struct OpenCodeModelProviderGroup: Identifiable, Hashable {

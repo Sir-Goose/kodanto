@@ -85,3 +85,21 @@ final class SessionRecencyFormatterTests: XCTestCase {
     private let day: TimeInterval = 24 * 60 * 60
     private let week: TimeInterval = 7 * 24 * 60 * 60
 }
+
+final class OpenCodeModelOptionVariantDisplayTests: XCTestCase {
+    func testDisplayVariantNameCapitalizesSingleWordVariants() {
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("low"), "Low")
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("medium"), "Medium")
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("high"), "High")
+    }
+
+    func testDisplayVariantNameMapsXHighToExtraHigh() {
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("xhigh"), "Extra High")
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("XHIGH"), "Extra High")
+    }
+
+    func testDisplayVariantNameNormalizesDelimitedUnknownVariants() {
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("super_high"), "Super High")
+        XCTAssertEqual(OpenCodeModelOption.displayVariantName("ultra-high"), "Ultra High")
+    }
+}
