@@ -198,6 +198,54 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare {
+        try await request(
+            path: "/session/\(sessionID)/share",
+            method: "POST",
+            directory: directory
+        )
+    }
+
+    func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare {
+        try await request(
+            path: "/session/\(sessionID)/share",
+            method: "DELETE",
+            directory: directory
+        )
+    }
+
+    func undo(sessionID: String, directory: String) async throws {
+        try await requestNoContent(
+            path: "/session/\(sessionID)/undo",
+            method: "POST",
+            directory: directory
+        )
+    }
+
+    func redo(sessionID: String, directory: String) async throws {
+        try await requestNoContent(
+            path: "/session/\(sessionID)/redo",
+            method: "POST",
+            directory: directory
+        )
+    }
+
+    func compactSession(sessionID: String, directory: String) async throws {
+        try await requestNoContent(
+            path: "/session/\(sessionID)/compact",
+            method: "POST",
+            directory: directory
+        )
+    }
+
+    func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)/fork",
+            method: "POST",
+            directory: directory
+        )
+    }
+
     func replyToPermission(requestID: String, directory: String, reply: String) async throws {
         try await requestNoContent(
             path: "/permission/\(requestID)/reply",

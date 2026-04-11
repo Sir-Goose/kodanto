@@ -772,6 +772,167 @@ final class KodantoAppModel {
         }
     }
 
+    var selectedSlashCommand: SlashCommand? {
+        composerStore.selectedSlashCommand
+    }
+
+    func selectNextSlashCommand() {
+        composerStore.selectNextSlashCommand()
+    }
+
+    func selectPreviousSlashCommand() {
+        composerStore.selectPreviousSlashCommand()
+    }
+
+    func executeSlashCommand(_ command: SlashCommand) {
+        switch command.id {
+        case "session.new":
+            handleNewSession()
+        case "session.share":
+            handleShareSession()
+        case "session.unshare":
+            handleUnshareSession()
+        case "session.undo":
+            handleUndo()
+        case "session.redo":
+            handleRedo()
+        case "session.compact":
+            handleCompact()
+        case "session.fork":
+            handleFork()
+        case "terminal.toggle":
+            isTerminalPanelOpen.toggle()
+        case "file.open":
+            break
+        case "model.choose":
+            break
+        case "agent.cycle":
+            handleAgentCycle()
+        case "mcp.toggle":
+            break
+        default:
+            break
+        }
+    }
+
+    private func handleNewSession() {
+        guard let projectID = workspaceStore.selectedProjectID else { return }
+        workspaceStore.clearSelectedSession()
+        syncSelectionContext(resetSessionState: true)
+    }
+
+    private func handleShareSession() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                _ = try await client.shareSession(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleUnshareSession() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.unshareSession(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleUndo() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.undo(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleRedo() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.redo(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleCompact() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.compactSession(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleFork() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let forkedSession = try await client.forkSession(sessionID: session.id, directory: project.worktree)
+                _ = workspaceStore.upsertSession(forkedSession, directory: project.worktree)
+                _ = workspaceStore.selectSession(forkedSession.id, in: project.id)
+                syncSelectionContext(resetSessionState: true)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleAgentCycle() {
+        guard !composerStore.availablePrimaryAgents.isEmpty else { return }
+        let currentIndex = composerStore.availablePrimaryAgents.firstIndex(where: { $0.name == composerStore.selectedAgentName }) ?? -1
+        let nextIndex = (currentIndex + 1) % composerStore.availablePrimaryAgents.count
+        composerStore.selectAgent(composerStore.availablePrimaryAgents[nextIndex].name)
+    }
+
     func selectSession(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {
         guard selectedProfile != nil else { return }
         let didSwitch = workspaceStore.selectSession(sessionID, in: projectID)

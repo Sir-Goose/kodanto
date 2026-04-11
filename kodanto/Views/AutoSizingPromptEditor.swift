@@ -9,6 +9,8 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
     let textInset: NSSize
     let maxHeight: CGFloat
     let onSubmit: () -> Void
+    var onSlashCommand: ((String) -> Void)?
+    var onSlashCommandDismiss: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -45,6 +47,8 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         textView.textContainer?.containerSize = NSSize(width: 1, height: CGFloat.greatestFiniteMagnitude)
         textView.string = text
         textView.onSubmit = onSubmit
+        textView.onSlashCommand = onSlashCommand
+        textView.onSlashCommandDismiss = onSlashCommandDismiss
 
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
@@ -111,6 +115,7 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
         private var isHeightRecalculationScheduled = false
         private var isRecalculatingHeight = false
         private var needsAnotherHeightPass = false
+        private var lastSlashCommandState = false
 
         init(parent: AutoSizingPromptEditor) {
             self.parent = parent
@@ -127,8 +132,29 @@ struct AutoSizingPromptEditor: NSViewRepresentable {
             if parent.text != updatedText {
                 parent.text = updatedText
             }
+            
+            checkForSlashCommand(in: textView)
 
             scheduleHeightRecalculation()
+        }
+        
+        private func checkForSlashCommand(in textView: NSTextView) {
+            let text = textView.string
+            let cursorPosition = textView.selectedRange().location
+            
+            let shouldShowSlash = text.hasPrefix("/") && cursorPosition <= text.count
+            
+            if shouldShowSlash && !lastSlashCommandState {
+                lastSlashCommandState = true
+                let query = String(text.dropFirst())
+                parent.onSlashCommand?(query)
+            } else if !shouldShowSlash && lastSlashCommandState {
+                lastSlashCommandState = false
+                parent.onSlashCommandDismiss?()
+            } else if shouldShowSlash && lastSlashCommandState {
+                let query = String(text.dropFirst())
+                parent.onSlashCommand?(query)
+            }
         }
 
         func textDidEndEditing(_ notification: Notification) {
@@ -217,6 +243,8 @@ final class PromptScrollView: NSScrollView {
 
 final class PromptTextView: NSTextView {
     var onSubmit: (() -> Void)?
+    var onSlashCommand: ((String) -> Void)?
+    var onSlashCommandDismiss: (() -> Void)?
     weak var coordinator: AutoSizingPromptEditor.Coordinator?
 
     static func shouldSubmit(for keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Bool {

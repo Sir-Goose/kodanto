@@ -18,6 +18,12 @@ final class ComposerStore {
     var modelLoadError: String?
     var draftPrompt = ""
     var currentPlaceholder: String = PlaceholderProvider.randomPlaceholder()
+    
+    var slashCommands: [SlashCommand] = SlashCommand.builtinCommands
+    var filteredSlashCommands: [SlashCommand] = SlashCommand.builtinCommands
+    var selectedSlashCommandIndex: Int = 0
+    var slashQuery: String = ""
+    var isSlashPopoverVisible: Bool = false
 
     private let modelSelectionStore: ModelSelectionStoring
     private let modelVariantSelectionStore: ModelVariantSelectionStoring
@@ -89,6 +95,55 @@ final class ComposerStore {
 
     func refreshPlaceholder() {
         currentPlaceholder = PlaceholderProvider.randomPlaceholder(excluding: currentPlaceholder)
+    }
+
+    func updateSlashQuery(_ query: String) {
+        slashQuery = query
+        filterSlashCommands()
+    }
+
+    func showSlashPopover() {
+        isSlashPopoverVisible = true
+        slashQuery = ""
+        filterSlashCommands()
+        selectedSlashCommandIndex = 0
+    }
+
+    func hideSlashPopover() {
+        isSlashPopoverVisible = false
+        slashQuery = ""
+        filteredSlashCommands = slashCommands
+        selectedSlashCommandIndex = 0
+    }
+
+    func selectNextSlashCommand() {
+        guard !filteredSlashCommands.isEmpty else { return }
+        selectedSlashCommandIndex = min(selectedSlashCommandIndex + 1, filteredSlashCommands.count - 1)
+    }
+
+    func selectPreviousSlashCommand() {
+        guard !filteredSlashCommands.isEmpty else { return }
+        selectedSlashCommandIndex = max(selectedSlashCommandIndex - 1, 0)
+    }
+
+    var selectedSlashCommand: SlashCommand? {
+        guard selectedSlashCommandIndex >= 0 && selectedSlashCommandIndex < filteredSlashCommands.count else {
+            return nil
+        }
+        return filteredSlashCommands[selectedSlashCommandIndex]
+    }
+
+    private func filterSlashCommands() {
+        if slashQuery.isEmpty {
+            filteredSlashCommands = slashCommands
+        } else {
+            let lowercasedQuery = slashQuery.lowercased()
+            filteredSlashCommands = slashCommands.filter { command in
+                command.trigger.lowercased().contains(lowercasedQuery) ||
+                command.title.lowercased().contains(lowercasedQuery) ||
+                (command.description?.lowercased().contains(lowercasedQuery) ?? false)
+            }
+        }
     }
 
     func selectModel(_ modelID: String) {

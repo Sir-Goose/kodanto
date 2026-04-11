@@ -9,6 +9,8 @@ struct MainSessionDetailPane: View {
     @State private var transcriptDisclosureStore = TranscriptDisclosureStore()
     @State private var userScrolledUp = false
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var isSlashPopoverVisible = false
+    @State private var slashQuery = ""
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -234,61 +236,155 @@ struct MainSessionDetailPane: View {
 
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
+        
+        let filteredCommands: [SlashCommand] = {
+            if slashQuery.isEmpty {
+                return SlashCommand.builtinCommands
+            }
+            let lowercasedQuery = slashQuery.lowercased()
+            return SlashCommand.builtinCommands.filter { command in
+                command.trigger.lowercased().contains(lowercasedQuery) ||
+                command.title.lowercased().contains(lowercasedQuery) ||
+                (command.description?.lowercased().contains(lowercasedQuery) ?? false)
+            }
+        }()
 
-        return VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                AutoSizingPromptEditor(
-                    text: $model.draftPrompt,
-                    measuredHeight: $promptEditorHeight,
-                    font: Self.composerNSFont,
-                    textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
-                    maxHeight: maxHeight
-                ) {
-                    guard model.canSendPrompt else { return }
-                    model.sendPrompt()
+        return ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack(alignment: .topLeading) {
+                    AutoSizingPromptEditor(
+                        text: $model.draftPrompt,
+                        measuredHeight: $promptEditorHeight,
+                        font: Self.composerNSFont,
+                        textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
+                        maxHeight: maxHeight,
+                        onSubmit: {
+                            if isSlashPopoverVisible {
+                                if let command = filteredCommands.first {
+                                    model.executeSlashCommand(command)
+                                    isSlashPopoverVisible = false
+                                    slashQuery = ""
+                                    model.draftPrompt = ""
+                                }
+                            } else {
+                                guard model.canSendPrompt else { return }
+                                model.sendPrompt()
+                            }
+                        },
+                        onSlashCommand: { query in
+                            slashQuery = query
+                            isSlashPopoverVisible = true
+                        },
+                        onSlashCommandDismiss: {
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                        }
+                    )
+                    .frame(height: resolvedPromptHeight)
+                    .onKeyPress(.escape) {
+                        if isSlashPopoverVisible {
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.upArrow) {
+                        if isSlashPopoverVisible {
+                            model.selectPreviousSlashCommand()
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.downArrow) {
+                        if isSlashPopoverVisible {
+                            model.selectNextSlashCommand()
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.tab) {
+                        if isSlashPopoverVisible {
+                            if let command = model.selectedSlashCommand {
+                                model.executeSlashCommand(command)
+                                isSlashPopoverVisible = false
+                                slashQuery = ""
+                                model.draftPrompt = ""
+                            }
+                            return .handled
+                        }
+                        return .ignored
+                    }
+
+                    if model.draftPrompt.isEmpty {
+                        Text(placeholderText)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, Self.composerHorizontalPadding)
+                            .padding(.vertical, Self.composerVerticalPadding)
+                            .allowsHitTesting(false)
+                    }
                 }
-                .frame(height: resolvedPromptHeight)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: resolvedPromptHeight, alignment: .topLeading)
 
-                if model.draftPrompt.isEmpty {
-                    Text(placeholderText)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, Self.composerHorizontalPadding)
-                        .padding(.vertical, Self.composerVerticalPadding)
-                        .allowsHitTesting(false)
+                HStack(alignment: .center, spacing: 12) {
+                    ComposerControlsRow(model: model)
+
+                    Button {
+                        if isSelectedSessionRunning {
+                            model.abortSession()
+                        } else if isSlashPopoverVisible {
+                            if let command = model.selectedSlashCommand {
+                                model.executeSlashCommand(command)
+                                isSlashPopoverVisible = false
+                                slashQuery = ""
+                                model.draftPrompt = ""
+                            }
+                        } else {
+                            model.sendPrompt()
+                        }
+                    } label: {
+                        Image(systemName: isSelectedSessionRunning ? "stop.fill" : "paperplane.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .disabled(!isSelectedSessionRunning && !model.canSendPrompt && !isSlashPopoverVisible)
+                    .help(isSelectedSessionRunning ? "Stop" : (isSlashPopoverVisible ? "Select Command" : "Send"))
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .frame(height: resolvedPromptHeight, alignment: .topLeading)
-
-            HStack(alignment: .center, spacing: 12) {
-                ComposerControlsRow(model: model)
-
-                Button {
-                    if isSelectedSessionRunning {
-                        model.abortSession()
-                    } else {
-                        model.sendPrompt()
+            .padding(Self.composerInnerPadding)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18))
+            )
+            .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
+            
+            if isSlashPopoverVisible {
+                SlashCommandPopover(
+                    commands: filteredCommands,
+                    selectedIndex: model.composerStore.selectedSlashCommandIndex,
+                    onSelect: { command in
+                        model.executeSlashCommand(command)
+                        isSlashPopoverVisible = false
+                        slashQuery = ""
+                        model.draftPrompt = ""
+                    },
+                    onHover: { index in
+                        model.composerStore.selectedSlashCommandIndex = index
                     }
-                } label: {
-                    Image(systemName: isSelectedSessionRunning ? "stop.fill" : "paperplane.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 34, height: 34)
+                )
+                .frame(width: 350)
+                .offset(y: -8)
+                .onAppear {
+                    model.composerStore.selectedSlashCommandIndex = 0
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .controlSize(.regular)
-                .disabled(!isSelectedSessionRunning && !model.canSendPrompt)
-                .help(isSelectedSessionRunning ? "Stop" : "Send")
             }
         }
-        .padding(Self.composerInnerPadding)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18))
-        )
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
     }
 
     private func bottomPanel(maxHeight: CGFloat) -> some View {
