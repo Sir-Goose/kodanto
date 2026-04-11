@@ -220,6 +220,18 @@ struct MainSessionDetailPane: View {
         }
     }
 
+    private var isNewChat: Bool {
+        selectedSession == nil && selectedProject != nil
+    }
+
+    private var placeholderText: String {
+        if isNewChat {
+            return model.composerStore.currentPlaceholder
+        } else {
+            return "Ask anything..."
+        }
+    }
+
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
 
@@ -238,7 +250,7 @@ struct MainSessionDetailPane: View {
                 .frame(height: resolvedPromptHeight)
 
                 if model.draftPrompt.isEmpty {
-                    Text(model.composerStore.currentPlaceholder)
+                    Text(placeholderText)
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, Self.composerHorizontalPadding)
