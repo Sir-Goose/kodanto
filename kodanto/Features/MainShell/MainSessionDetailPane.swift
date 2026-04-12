@@ -363,32 +363,23 @@ struct MainSessionDetailPane: View {
                     .stroke(Color.secondary.opacity(0.18))
             )
             .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
-            
-            if isSlashPopoverVisible {
-                SlashCommandPopover(
-                    commands: filteredCommands,
-                    selectedIndex: model.composerStore.selectedSlashCommandIndex,
-                    onSelect: { command in
-                        model.executeSlashCommand(command)
-                        isSlashPopoverVisible = false
-                        slashQuery = ""
-                        model.draftPrompt = ""
-                    },
-                    onHover: { index in
-                        model.composerStore.selectedSlashCommandIndex = index
-                    }
-                )
-                .frame(width: 350)
-                .offset(y: -8)
-                .onAppear {
-                    model.composerStore.selectedSlashCommandIndex = 0
-                }
-            }
         }
     }
 
     private func bottomPanel(maxHeight: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: Self.composerContentGap) {
+        let filteredCommands: [SlashCommand] = {
+            if slashQuery.isEmpty {
+                return SlashCommand.builtinCommands
+            }
+            let lowercasedQuery = slashQuery.lowercased()
+            return SlashCommand.builtinCommands.filter { command in
+                command.trigger.lowercased().contains(lowercasedQuery) ||
+                command.title.lowercased().contains(lowercasedQuery) ||
+                (command.description?.lowercased().contains(lowercasedQuery) ?? false)
+            }
+        }()
+
+        return VStack(alignment: .leading, spacing: Self.composerContentGap) {
             SessionTodoDockView(todos: sessionTodos)
                 .id(selectedSessionID ?? "session-todo-dock")
 
@@ -399,6 +390,26 @@ struct MainSessionDetailPane: View {
                 SessionQuestionDockView(model: model, request: request)
                     .id(request.id)
             } else {
+                if isSlashPopoverVisible {
+                    SlashCommandPopover(
+                        commands: filteredCommands,
+                        selectedIndex: model.composerStore.selectedSlashCommandIndex,
+                        onSelect: { command in
+                            model.executeSlashCommand(command)
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                            model.draftPrompt = ""
+                        },
+                        onHover: { index in
+                            model.composerStore.selectedSlashCommandIndex = index
+                        }
+                    )
+                    .frame(width: 350)
+                    .onAppear {
+                        model.composerStore.selectedSlashCommandIndex = 0
+                    }
+                }
+
                 composer(maxHeight: maxHeight)
             }
         }
