@@ -430,9 +430,16 @@ struct MainSessionDetailPane: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if let shareURL = session.share?.url {
-                    Label(shareURL, systemImage: "link")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Button {
+                        if let url = URL(string: shareURL) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label(shareURL, systemImage: "link")
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }

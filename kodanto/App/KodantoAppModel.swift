@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AppKit
 
 @MainActor
 @Observable
@@ -39,6 +40,7 @@ final class KodantoAppModel {
     var showingConnectionSheet = false
     var showingConnectionsManager = false
     var showingDiagnostics = false
+    var notification: String?
     var isTerminalPanelOpen = false
     var terminalPanelHeight: Double = TerminalLayoutState.default.height
 
@@ -830,8 +832,12 @@ final class KodantoAppModel {
 
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
-                _ = try await client.shareSession(sessionID: session.id, directory: project.worktree)
+                let share = try await client.shareSession(sessionID: session.id, directory: project.worktree)
                 try await loadSessionDetail(using: client)
+                
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(share.url, forType: .string)
+                notification = "Share link copied to clipboard"
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -849,6 +855,7 @@ final class KodantoAppModel {
                 let client = dependencies.apiFactory.makeService(profile: profile)
                 try await client.unshareSession(sessionID: session.id, directory: project.worktree)
                 try await loadSessionDetail(using: client)
+                notification = "Session unshared"
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
