@@ -74,6 +74,19 @@ struct MainSessionDetailPane: View {
         model.workspaceStore.isSelectedSessionRunning
     }
 
+    private var filteredSlashCommands: [SlashCommand] {
+        if slashQuery.isEmpty {
+            return SlashCommand.builtinCommands
+        }
+
+        let lowercasedQuery = slashQuery.lowercased()
+        return SlashCommand.builtinCommands.filter { command in
+            command.trigger.lowercased().contains(lowercasedQuery) ||
+            command.title.lowercased().contains(lowercasedQuery) ||
+            (command.description?.lowercased().contains(lowercasedQuery) ?? false)
+        }
+    }
+
     var body: some View {
         GeometryReader { geometry in
             detailContent(for: geometry.size.height)
@@ -201,6 +214,29 @@ struct MainSessionDetailPane: View {
                     scrollPosition.scrollTo(edge: .bottom)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if isSlashPopoverVisible {
+                    SlashCommandPopover(
+                        commands: filteredSlashCommands,
+                        selectedIndex: model.composerStore.selectedSlashCommandIndex,
+                        onSelect: { command in
+                            model.executeSlashCommand(command)
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                            model.draftPrompt = ""
+                        },
+                        onHover: { index in
+                            model.composerStore.selectedSlashCommandIndex = index
+                        }
+                    )
+                    .frame(maxWidth: Self.composerMaxWidth)
+                    .padding(.horizontal, Self.composerOuterPadding)
+                    .padding(.bottom, Self.composerContentGap)
+                    .onAppear {
+                        model.composerStore.selectedSlashCommandIndex = 0
+                    }
+                }
+            }
         }
     }
 
@@ -236,18 +272,6 @@ struct MainSessionDetailPane: View {
 
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
-        
-        let filteredCommands: [SlashCommand] = {
-            if slashQuery.isEmpty {
-                return SlashCommand.builtinCommands
-            }
-            let lowercasedQuery = slashQuery.lowercased()
-            return SlashCommand.builtinCommands.filter { command in
-                command.trigger.lowercased().contains(lowercasedQuery) ||
-                command.title.lowercased().contains(lowercasedQuery) ||
-                (command.description?.lowercased().contains(lowercasedQuery) ?? false)
-            }
-        }()
 
         return ZStack(alignment: .topLeading) {
             VStack(alignment: .leading, spacing: 10) {
@@ -260,7 +284,7 @@ struct MainSessionDetailPane: View {
                         maxHeight: maxHeight,
                         onSubmit: {
                             if isSlashPopoverVisible {
-                                if let command = filteredCommands.first {
+                                if let command = filteredSlashCommands.first {
                                     model.executeSlashCommand(command)
                                     isSlashPopoverVisible = false
                                     slashQuery = ""
@@ -368,18 +392,6 @@ struct MainSessionDetailPane: View {
     }
 
     private func bottomPanel(maxHeight: CGFloat) -> some View {
-        let filteredCommands: [SlashCommand] = {
-            if slashQuery.isEmpty {
-                return SlashCommand.builtinCommands
-            }
-            let lowercasedQuery = slashQuery.lowercased()
-            return SlashCommand.builtinCommands.filter { command in
-                command.trigger.lowercased().contains(lowercasedQuery) ||
-                command.title.lowercased().contains(lowercasedQuery) ||
-                (command.description?.lowercased().contains(lowercasedQuery) ?? false)
-            }
-        }()
-
         return VStack(alignment: .leading, spacing: Self.composerContentGap) {
             SessionTodoDockView(todos: sessionTodos)
                 .id(selectedSessionID ?? "session-todo-dock")
@@ -391,26 +403,6 @@ struct MainSessionDetailPane: View {
                 SessionQuestionDockView(model: model, request: request)
                     .id(request.id)
             } else {
-                if isSlashPopoverVisible {
-                    SlashCommandPopover(
-                        commands: filteredCommands,
-                        selectedIndex: model.composerStore.selectedSlashCommandIndex,
-                        onSelect: { command in
-                            model.executeSlashCommand(command)
-                            isSlashPopoverVisible = false
-                            slashQuery = ""
-                            model.draftPrompt = ""
-                        },
-                        onHover: { index in
-                            model.composerStore.selectedSlashCommandIndex = index
-                        }
-                    )
-                    .frame(maxWidth: .infinity)
-                    .onAppear {
-                        model.composerStore.selectedSlashCommandIndex = 0
-                    }
-                }
-
                 composer(maxHeight: maxHeight)
             }
         }
