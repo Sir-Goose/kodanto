@@ -356,6 +356,7 @@ struct MainSessionDetailPane: View {
                     .help(isSelectedSessionRunning ? "Stop" : (isSlashPopoverVisible ? "Select Command" : "Send"))
                 }
             }
+            .frame(maxWidth: .infinity)
             .padding(Self.composerInnerPadding)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .overlay(
@@ -404,7 +405,7 @@ struct MainSessionDetailPane: View {
                             model.composerStore.selectedSlashCommandIndex = index
                         }
                     )
-                    .frame(width: 350)
+                    .frame(maxWidth: .infinity)
                     .onAppear {
                         model.composerStore.selectedSlashCommandIndex = 0
                     }
