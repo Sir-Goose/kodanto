@@ -612,6 +612,12 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
     func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
+    func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
+    func undo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func redo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func compactSession(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
     func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
     func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
     func createPTY(
@@ -672,6 +678,12 @@ private final class SessionUnreadMockAPIService: OpenCodeAPIService {
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] { fatalError("unused") }
     func createSession(directory: String, title: String?) async throws -> OpenCodeSession { fatalError("unused") }
     func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
+    func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
+    func undo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func redo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func compactSession(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
     func ptySessions(directory: String) async throws -> [OpenCodePTY] { [] }
     func ptySession(ptyID: String, directory: String) async throws -> OpenCodePTY { fatalError("unused") }
     func createPTY(
