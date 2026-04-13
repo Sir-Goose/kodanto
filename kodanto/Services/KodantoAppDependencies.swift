@@ -50,8 +50,8 @@ protocol OpenCodeAPIService {
     func abortSession(sessionID: String, directory: String) async throws
     func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare
     func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare
-    func undo(sessionID: String, directory: String) async throws
-    func redo(sessionID: String, directory: String) async throws
+    func revert(sessionID: String, messageID: String, directory: String) async throws -> OpenCodeSession
+    func unrevert(sessionID: String, directory: String) async throws -> OpenCodeSession
     func compactSession(sessionID: String, directory: String) async throws
     func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession
     func replyToPermission(requestID: String, directory: String, reply: String) async throws

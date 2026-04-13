@@ -214,17 +214,18 @@ struct OpenCodeAPIClient {
         )
     }
 
-    func undo(sessionID: String, directory: String) async throws {
-        try await requestNoContent(
-            path: "/session/\(sessionID)/undo",
+    func revert(sessionID: String, messageID: String, directory: String) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)/revert",
             method: "POST",
-            directory: directory
+            directory: directory,
+            body: AnyEncodable(RevertBody(messageID: messageID, partID: nil))
         )
     }
 
-    func redo(sessionID: String, directory: String) async throws {
-        try await requestNoContent(
-            path: "/session/\(sessionID)/redo",
+    func unrevert(sessionID: String, directory: String) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)/unrevert",
             method: "POST",
             directory: directory
         )
@@ -497,6 +498,11 @@ struct OpenCodeAPIClient {
 
         return request
     }
+}
+
+private struct RevertBody: Encodable {
+    let messageID: String
+    let partID: String?
 }
 
 enum OpenCodeAPIError: LocalizedError {

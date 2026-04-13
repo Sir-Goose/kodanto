@@ -877,8 +877,22 @@ final class KodantoAppModel {
 
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
-                try await client.undo(sessionID: session.id, directory: project.worktree)
+                let messages = try await client.messages(sessionID: session.id, directory: project.worktree)
+
+                var lastUserMessageID: String?
+                for msg in messages {
+                    if case .user = msg.info,
+                       session.revert?.messageID == nil || msg.id < session.revert!.messageID {
+                        lastUserMessageID = msg.id
+                    }
+                }
+
+                guard let messageID = lastUserMessageID else { return }
+
+                let updatedSession = try await client.revert(sessionID: session.id, messageID: messageID, directory: project.worktree)
+                _ = workspaceStore.upsertSession(updatedSession, directory: project.worktree)
                 try await loadSessionDetail(using: client)
+                notification = "Message removed"
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }
@@ -894,8 +908,28 @@ final class KodantoAppModel {
 
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
-                try await client.redo(sessionID: session.id, directory: project.worktree)
+                let messages = try await client.messages(sessionID: session.id, directory: project.worktree)
+
+                if let revertMessageID = session.revert?.messageID,
+                   let nextUserMessageID = messages.first(where: {
+                       if case .user = $0.info {
+                           return $0.id > revertMessageID
+                       }
+                       return false
+                   })?.id {
+                    let updatedSession = try await client.revert(
+                        sessionID: session.id,
+                        messageID: nextUserMessageID,
+                        directory: project.worktree
+                    )
+                    _ = workspaceStore.upsertSession(updatedSession, directory: project.worktree)
+                } else {
+                    let updatedSession = try await client.unrevert(sessionID: session.id, directory: project.worktree)
+                    _ = workspaceStore.upsertSession(updatedSession, directory: project.worktree)
+                }
+
                 try await loadSessionDetail(using: client)
+                notification = "Message restored"
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }

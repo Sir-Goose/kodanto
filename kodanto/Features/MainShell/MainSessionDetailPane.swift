@@ -3,6 +3,8 @@ import SwiftUI
 
 struct MainSessionDetailPane: View {
     @Bindable var model: KodantoAppModel
+    @Bindable var workspaceStore: WorkspaceStore
+    @Bindable var sessionDetailStore: SessionDetailStore
     let splitViewVisibility: NavigationSplitViewVisibility
 
     @State private var promptEditorHeight: CGFloat = 0
@@ -31,27 +33,38 @@ struct MainSessionDetailPane: View {
     }
 
     private var selectedProject: OpenCodeProject? {
-        model.workspaceStore.selectedProject
+        workspaceStore.selectedProject
     }
 
     private var selectedSession: OpenCodeSession? {
-        model.workspaceStore.selectedSession
+        workspaceStore.selectedSession
     }
 
     private var selectedSessionID: OpenCodeSession.ID? {
-        model.workspaceStore.selectedSessionID
+        workspaceStore.selectedSessionID
     }
 
     private var selectedSessionMessages: [OpenCodeMessageEnvelope] {
-        model.sessionDetailStore.selectedSessionMessages
+        sessionDetailStore.selectedSessionMessages
     }
 
-    private var selectedSessionTurns: [TranscriptTurn] {
-        model.sessionDetailStore.selectedSessionTurns
+    private var selectedSessionRevertMessageID: String? {
+        selectedSession?.revert?.messageID
+    }
+
+    private var visibleSessionMessages: [OpenCodeMessageEnvelope] {
+        guard let revertMessageID = selectedSessionRevertMessageID else {
+            return selectedSessionMessages
+        }
+        return selectedSessionMessages.filter { $0.id < revertMessageID }
+    }
+
+    private var visibleSessionTurns: [TranscriptTurn] {
+        TranscriptTurn.build(from: visibleSessionMessages)
     }
 
     private var sessionTodos: [OpenCodeTodo] {
-        model.sessionDetailStore.sessionTodos
+        sessionDetailStore.sessionTodos
     }
 
     private var permissions: [OpenCodePermissionRequest] {
@@ -71,7 +84,7 @@ struct MainSessionDetailPane: View {
     }
 
     private var isSelectedSessionRunning: Bool {
-        model.workspaceStore.isSelectedSessionRunning
+        workspaceStore.isSelectedSessionRunning
     }
 
     private var filteredSlashCommands: [SlashCommand] {
@@ -186,7 +199,7 @@ struct MainSessionDetailPane: View {
                     transcriptTurns
                 }
                 .scrollTargetLayout()
-                .id("transcript-\(selectedSessionID ?? "none")")
+                .id("transcript-\(selectedSessionID ?? "none")-\(sessionDetailStore.selectedSessionTranscriptRevision)-\(selectedSessionRevertMessageID ?? "none")")
                 .padding()
                 .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -241,7 +254,7 @@ struct MainSessionDetailPane: View {
     }
 
     private var transcriptTurns: some View {
-        let turns = selectedSessionTurns
+        let turns = visibleSessionTurns
         return ForEach(turns) { turn in
             TranscriptTurnView(
                 turn: turn,

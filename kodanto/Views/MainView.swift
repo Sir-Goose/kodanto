@@ -36,6 +36,8 @@ struct MainView: View {
         } detail: {
             MainSessionDetailPane(
                 model: model,
+                workspaceStore: model.workspaceStore,
+                sessionDetailStore: model.sessionDetailStore,
                 splitViewVisibility: splitViewVisibility
             )
         }
