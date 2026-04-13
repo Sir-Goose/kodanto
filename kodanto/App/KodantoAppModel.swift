@@ -938,15 +938,33 @@ final class KodantoAppModel {
 
     private func handleCompact() {
         Task {
-            guard let profile = selectedProfile,
-                  let project = selectedProject,
-                  let session = selectedSession
-            else { return }
+            guard let profile = selectedProfile else {
+                notification = "No profile selected"
+                return
+            }
+            guard let project = selectedProject else {
+                notification = "No project selected"
+                return
+            }
+            guard let session = selectedSession else {
+                notification = "No session selected"
+                return
+            }
+            guard let model = composerStore.selectedModel else {
+                notification = "No model selected"
+                return
+            }
 
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
-                try await client.compactSession(sessionID: session.id, directory: project.worktree)
+                try await client.compactSession(
+                    sessionID: session.id,
+                    directory: project.worktree,
+                    providerID: model.providerID,
+                    modelID: model.modelID
+                )
                 try await loadSessionDetail(using: client)
+                notification = "Session compacted"
             } catch {
                 connectionState = .failed(error.localizedDescription)
             }

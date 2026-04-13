@@ -231,11 +231,12 @@ struct OpenCodeAPIClient {
         )
     }
 
-    func compactSession(sessionID: String, directory: String) async throws {
+    func compactSession(sessionID: String, directory: String, providerID: String, modelID: String) async throws {
         try await requestNoContent(
-            path: "/session/\(sessionID)/compact",
+            path: "/session/\(sessionID)/summarize",
             method: "POST",
-            directory: directory
+            directory: directory,
+            body: AnyEncodable(SummarizeBody(providerID: providerID, modelID: modelID, auto: false))
         )
     }
 
@@ -503,6 +504,12 @@ struct OpenCodeAPIClient {
 private struct RevertBody: Encodable {
     let messageID: String
     let partID: String?
+}
+
+private struct SummarizeBody: Encodable {
+    let providerID: String
+    let modelID: String
+    let auto: Bool
 }
 
 enum OpenCodeAPIError: LocalizedError {

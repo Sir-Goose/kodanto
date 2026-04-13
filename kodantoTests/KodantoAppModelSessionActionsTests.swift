@@ -461,7 +461,7 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
     func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
     func undo(sessionID: String, directory: String) async throws { fatalError("unused") }
     func redo(sessionID: String, directory: String) async throws { fatalError("unused") }
-    func compactSession(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func compactSession(sessionID: String, directory: String, providerID: String, modelID: String) async throws { fatalError("unused") }
     func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
