@@ -1,6 +1,11 @@
 import Darwin
 import Foundation
 
+private struct ProviderAuth: Codable {
+    let type: String?
+    let key: String?
+}
+
 final class SidecarProcess {
     private(set) var process: Process?
     private(set) var outputHandler: ((String) -> Void)?
@@ -35,6 +40,13 @@ final class SidecarProcess {
         process.arguments = ["serve", "--hostname", host, "--port", String(port)]
 
         var environment = ProcessInfo.processInfo.environment
+
+        if let authKeys = try? Self.loadProviderAPIKeys() {
+            for (key, value) in authKeys {
+                environment[key] = value
+            }
+        }
+
         environment["OPENCODE_SERVER_USERNAME"] = profile.username
         if let password = profile.password, !password.isEmpty {
             environment["OPENCODE_SERVER_PASSWORD"] = password
@@ -167,6 +179,121 @@ final class SidecarProcess {
             .filter { !$0.isEmpty && $0.contains(".") }
 
         return versionTokens.first ?? normalized
+    }
+
+    private static func loadProviderAPIKeys() throws -> [String: String] {
+        var keys: [String: String] = [:]
+        let currentEnv = ProcessInfo.processInfo.environment
+
+        if let authKeys = try? loadAuthJSONKeys() {
+            keys.merge(authKeys) { _, new in new }
+        }
+
+        if let shellKeys = try? loadShellConfigKeys() {
+            keys.merge(shellKeys) { _, new in new }
+        }
+
+        let knownProviderEnvVars = [
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENAI_API_KEY_2",
+            "OPENAI_API_KEY_3",
+            "GOOGLE_GENERATIVE_AI_API_KEY",
+            "GOOGLE_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+            "MISTRAL_API_KEY",
+            "GROQ_API_KEY",
+            "OPENROUTER_API_KEY",
+            "TOGETHER_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "QWEN_API_KEY",
+            "DASHSCOPE_API_KEY",
+            "ALIBABA_API_KEY",
+            "CLOUDEAI_API_KEY",
+            "CROFAI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_API_KEY",
+            "VERTEX_API_KEY",
+            "GEMINI_API_KEY"
+        ]
+
+        for varName in knownProviderEnvVars {
+            if let value = currentEnv[varName], !value.isEmpty {
+                keys[varName] = value
+            }
+        }
+
+        return keys
+    }
+
+    private static func loadShellConfigKeys() throws -> [String: String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let configFiles = [
+            "\(home)/.zshrc",
+            "\(home)/.bashrc",
+            "\(home)/.zprofile",
+            "\(home)/.bash_profile",
+            "\(home)/.profile"
+        ]
+
+        var keys: [String: String] = [:]
+        let knownVars = [
+            "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENAI_API_KEY_2", "OPENAI_API_KEY_3",
+            "GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY", "AZURE_OPENAI_API_KEY",
+            "MISTRAL_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "TOGETHER_API_KEY",
+            "PERPLEXITY_API_KEY", "DEEPSEEK_API_KEY", "QWEN_API_KEY", "DASHSCOPE_API_KEY",
+            "ALIBABA_API_KEY", "CLOUDEAI_API_KEY", "CROFAI_API_KEY", "MOONSHOT_API_KEY",
+            "KIMI_API_KEY", "VERTEX_API_KEY", "GEMINI_API_KEY"
+        ]
+
+        for configPath in configFiles {
+            guard FileManager.default.fileExists(atPath: configPath) else { continue }
+            guard let content = try? String(contentsOfFile: configPath, encoding: .utf8) else { continue }
+
+            for line in content.components(separatedBy: .newlines) {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("export ") else { continue }
+                let afterExport = String(trimmed.dropFirst(6))
+                guard let range = afterExport.range(of: "=") else { continue }
+                let varName = String(afterExport[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+                guard knownVars.contains(varName) else { continue }
+                var value = String(afterExport[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                if value.hasPrefix("\"") && value.hasSuffix("\"") {
+                    value = String(value.dropFirst().dropLast())
+                } else if value.hasPrefix("'") && value.hasSuffix("'") {
+                    value = String(value.dropFirst().dropLast())
+                }
+                if !value.isEmpty && keys[varName] == nil {
+                    keys[varName] = value
+                }
+            }
+        }
+
+        return keys
+    }
+
+    private static func loadAuthJSONKeys() throws -> [String: String] {
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser.path
+        let authPath = "\(home)/.local/share/opencode/auth.json"
+
+        guard fileManager.fileExists(atPath: authPath) else { return [:] }
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: authPath))
+        guard let auth = try? JSONDecoder().decode([String: ProviderAuth].self, from: data) else {
+            return [:]
+        }
+
+        var keys: [String: String] = [:]
+        for (name, authInfo) in auth {
+            if let key = authInfo.key {
+                let envName = "\(name.uppercased().replacingOccurrences(of: "-", with: "_"))_API_KEY"
+                keys[envName] = key
+            }
+        }
+
+        return keys
     }
 
     private static func commandOutput(
