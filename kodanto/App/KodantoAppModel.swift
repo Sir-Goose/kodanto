@@ -717,10 +717,8 @@ final class KodantoAppModel {
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
                 let session: OpenCodeSession
-                let createdSessionJustNow: Bool
                 if let selectedSession {
                     session = selectedSession
-                    createdSessionJustNow = false
                 } else {
                     let createdSession = try await client.createSession(directory: project.worktree, title: nil)
                     _ = workspaceStore.upsertSession(createdSession, directory: project.worktree)
@@ -728,26 +726,15 @@ final class KodantoAppModel {
                     syncSelectionContext(resetSessionState: true)
                     try await loadSessionDetail(using: client)
                     session = selectedSession ?? createdSession
-                    createdSessionJustNow = true
                 }
 
-                if createdSessionJustNow {
-                    try await composerStore.submitPrompt(
-                        using: client,
-                        project: project,
-                        session: session
-                    ) {
-                        try await self.loadSessionDetail(using: client)
-                    }
-                } else {
-                    try await composerStore.submitPrompt(
-                        using: client,
-                        project: project,
-                        session: session
-                    ) {
-                        try await self.loadSessionDetail(using: client)
-                        try await self.loadSessions(for: project, using: client)
-                    }
+                try await composerStore.submitPrompt(
+                    using: client,
+                    project: project,
+                    session: session
+                ) {
+                    try await self.loadSessionDetail(using: client)
+                    try await self.loadSessions(for: project, using: client)
                 }
             } catch {
                 if let profile = selectedProfile {
