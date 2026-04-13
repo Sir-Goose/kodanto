@@ -549,6 +549,25 @@ final class KodantoAppModel {
         }
     }
 
+    func restartServer() {
+        Task {
+            guard let profile = selectedProfile else { return }
+            guard profile.kind == .localSidecar else { return }
+            appendSidecarLog("Restarting server...\n")
+            do {
+                try await dependencies.sidecar.restart(profile: profile)
+                try await waitForServer(profile: profile)
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let health = try await client.health()
+                connectionState = .connected(version: health.version)
+                try await refreshAll(using: client, scope: .full)
+                startLiveSync(for: profile)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
     func refreshModelCatalogForSelectedProject() {
         guard connectionState.isConnected,
               let profile = selectedProfile,

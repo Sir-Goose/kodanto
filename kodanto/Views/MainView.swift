@@ -260,6 +260,13 @@ struct MainView: View {
                     }
                 }
 
+                if model.selectedProfile?.kind == .localSidecar {
+                    Button("Restart Server") {
+                        showingConnectionPopover = false
+                        model.restartServer()
+                    }
+                }
+
                 Button("Add Connection...") {
                     presentAddConnection()
                 }
