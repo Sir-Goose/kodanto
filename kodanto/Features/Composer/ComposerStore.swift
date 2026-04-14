@@ -20,10 +20,12 @@ final class ComposerStore {
     var currentPlaceholder: String = PlaceholderProvider.randomPlaceholder()
     
     var slashCommands: [SlashCommand] = SlashCommand.builtinCommands
-    var filteredSlashCommands: [SlashCommand] = SlashCommand.builtinCommands
+    var filteredSlashCommands: [SlashCommand] = SlashCommand.builtinCommands.filter { $0.availability == .always }
     var selectedSlashCommandIndex: Int = 0
     var slashQuery: String = ""
     var isSlashPopoverVisible: Bool = false
+    var hasActiveSession: Bool = false
+    var hasMessages: Bool = false
 
     private let modelSelectionStore: ModelSelectionStoring
     private let modelVariantSelectionStore: ModelVariantSelectionStoring
@@ -81,6 +83,9 @@ final class ComposerStore {
         lastSyncedAgentMessageID = nil
         isLoadingModels = false
         modelLoadError = nil
+        hasActiveSession = false
+        hasMessages = false
+        filteredSlashCommands = contextAwareCommands
     }
 
     func clearModelCatalog() {
@@ -95,6 +100,10 @@ final class ComposerStore {
 
     func refreshPlaceholder() {
         currentPlaceholder = PlaceholderProvider.randomPlaceholder(excluding: currentPlaceholder)
+    }
+
+    func refreshFilteredSlashCommands() {
+        filterSlashCommands()
     }
 
     func updateSlashQuery(_ query: String) {
@@ -112,7 +121,7 @@ final class ComposerStore {
     func hideSlashPopover() {
         isSlashPopoverVisible = false
         slashQuery = ""
-        filteredSlashCommands = slashCommands
+        filteredSlashCommands = contextAwareCommands
         selectedSlashCommandIndex = 0
     }
 
@@ -133,12 +142,25 @@ final class ComposerStore {
         return filteredSlashCommands[selectedSlashCommandIndex]
     }
 
+    private var contextAwareCommands: [SlashCommand] {
+        slashCommands.filter { command in
+            switch command.availability {
+            case .always:
+                return true
+            case .requiresSession:
+                return hasActiveSession
+            case .requiresSessionWithMessages:
+                return hasActiveSession && hasMessages
+            }
+        }
+    }
+
     private func filterSlashCommands() {
         if slashQuery.isEmpty {
-            filteredSlashCommands = slashCommands
+            filteredSlashCommands = contextAwareCommands
         } else {
             let lowercasedQuery = slashQuery.lowercased()
-            filteredSlashCommands = slashCommands.filter { command in
+            filteredSlashCommands = contextAwareCommands.filter { command in
                 command.trigger.lowercased().contains(lowercasedQuery) ||
                 command.title.lowercased().contains(lowercasedQuery) ||
                 (command.description?.lowercased().contains(lowercasedQuery) ?? false)

@@ -39,7 +39,8 @@ final class SlashCommandTests: XCTestCase {
             description: "A test command",
             keybind: "⌘T",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         )
         let command2 = SlashCommand(
             id: "test.command",
@@ -48,7 +49,8 @@ final class SlashCommandTests: XCTestCase {
             description: "A test command",
             keybind: "⌘T",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         )
         XCTAssertEqual(command1, command2)
     }
@@ -61,7 +63,8 @@ final class SlashCommandTests: XCTestCase {
             description: nil,
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         )
         let command2 = SlashCommand(
             id: "test.command2",
@@ -70,7 +73,8 @@ final class SlashCommandTests: XCTestCase {
             description: nil,
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         )
         XCTAssertNotEqual(command1, command2)
     }
@@ -83,11 +87,20 @@ final class SlashCommandTests: XCTestCase {
             description: nil,
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         )
         var hashSet = Set<SlashCommand>()
         hashSet.insert(command)
         XCTAssertTrue(hashSet.contains(command))
+    }
+
+    func testAvailabilityFiltersWithoutSession() {
+        let alwaysCommands = SlashCommand.builtinCommands.filter { $0.availability == .always }
+        let sessionCommands = SlashCommand.builtinCommands.filter { $0.availability == .requiresSession }
+        let messageCommands = SlashCommand.builtinCommands.filter { $0.availability == .requiresSessionWithMessages }
+        XCTAssertFalse(alwaysCommands.isEmpty, "Should have always-available commands")
+        XCTAssertFalse(sessionCommands.isEmpty || messageCommands.isEmpty, "Should have session-dependent commands")
     }
 }
 
@@ -107,16 +120,30 @@ final class ComposerStoreSlashCommandTests: XCTestCase {
         XCTAssertEqual(store.slashCommands.count, SlashCommand.builtinCommands.count)
     }
 
-    func testFilteredCommandsStartsWithAllCommands() {
-        XCTAssertEqual(store.filteredSlashCommands, store.slashCommands)
+    func testFilteredCommandsStartWithContextAware() {
+        store.hasActiveSession = false
+        store.hasMessages = false
+        let alwaysCount = SlashCommand.builtinCommands.filter { $0.availability == .always }.count
+        XCTAssertEqual(store.filteredSlashCommands.count, alwaysCount)
+    }
+
+    func testFilteredCommandsIncludeSessionDependentWithSession() {
+        store.hasActiveSession = true
+        store.hasMessages = true
+        store.updateSlashQuery("")
+        XCTAssertEqual(store.filteredSlashCommands.count, SlashCommand.builtinCommands.count)
     }
 
     func testFilterByTrigger() {
+        store.hasActiveSession = true
+        store.hasMessages = true
         store.updateSlashQuery("new")
         XCTAssertTrue(store.filteredSlashCommands.allSatisfy { $0.trigger.contains("new") })
     }
 
     func testFilterByTitle() {
+        store.hasActiveSession = true
+        store.hasMessages = true
         store.updateSlashQuery("session")
         XCTAssertTrue(store.filteredSlashCommands.allSatisfy {
             $0.title.lowercased().contains("session")
@@ -124,17 +151,23 @@ final class ComposerStoreSlashCommandTests: XCTestCase {
     }
 
     func testFilterByDescription() {
+        store.hasActiveSession = true
+        store.hasMessages = true
         store.updateSlashQuery("share")
         let matchingShare = store.filteredSlashCommands.contains { $0.id == "session.share" }
         XCTAssertTrue(matchingShare)
     }
 
     func testFilterIsCaseInsensitive() {
+        store.hasActiveSession = true
+        store.hasMessages = true
         store.updateSlashQuery("NEW")
         XCTAssertTrue(store.filteredSlashCommands.allSatisfy { $0.trigger.contains("new") })
     }
 
-    func testEmptyQueryReturnsAllCommands() {
+    func testEmptyQueryReturnsContextAwareCommands() {
+        store.hasActiveSession = true
+        store.hasMessages = true
         store.updateSlashQuery("")
         XCTAssertEqual(store.filteredSlashCommands.count, SlashCommand.builtinCommands.count)
     }
@@ -194,7 +227,23 @@ final class ComposerStoreSlashCommandTests: XCTestCase {
         XCTAssertEqual(selected?.id, store.filteredSlashCommands[store.selectedSlashCommandIndex].id)
     }
 
-    func testSelectedSlashCommandReturnsNilWhenEmpty() {
+    func testContextFiltersOutSessionCommandsWhenNoSession() {
+        store.hasActiveSession = false
+        store.hasMessages = false
+        store.updateSlashQuery("")
+        let alwaysIDs = SlashCommand.builtinCommands.filter { $0.availability == .always }.map(\.id)
+        let filteredIDs = store.filteredSlashCommands.map(\.id)
+        XCTAssertEqual(filteredIDs.sorted(), alwaysIDs.sorted())
+    }
+
+    func testContextFiltersOutMessageCommandsWhenNoMessages() {
+        store.hasActiveSession = true
+        store.hasMessages = false
+        store.updateSlashQuery("")
+        let alwaysAndSessionOnlyIDs = SlashCommand.builtinCommands.filter { $0.availability != .requiresSessionWithMessages }.map(\.id)
+        let filteredIDs = store.filteredSlashCommands.map(\.id)
+        XCTAssertEqual(filteredIDs.sorted(), alwaysAndSessionOnlyIDs.sorted())
+    }
         store.updateSlashQuery("nonexistentcommand12345")
         XCTAssertNil(store.selectedSlashCommand)
     }

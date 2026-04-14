@@ -14,7 +14,7 @@ struct SlashCommandPopover: View {
                 commandListView
             }
         }
-        .frame(maxHeight: 280)
+        .frame(minWidth: 280, maxHeight: 280)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)

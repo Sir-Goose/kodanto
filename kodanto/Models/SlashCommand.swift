@@ -11,6 +11,12 @@ enum SlashCommandSource: String, Codable, Equatable {
     case skill
 }
 
+enum SlashCommandAvailability: String, Codable, Equatable {
+    case always
+    case requiresSession
+    case requiresSessionWithMessages
+}
+
 struct SlashCommand: Identifiable, Equatable, Hashable {
     let id: String
     let trigger: String
@@ -19,6 +25,7 @@ struct SlashCommand: Identifiable, Equatable, Hashable {
     let keybind: String?
     let type: SlashCommandType
     let source: SlashCommandSource?
+    let availability: SlashCommandAvailability
 
     static func == (lhs: SlashCommand, rhs: SlashCommand) -> Bool {
         lhs.id == rhs.id
@@ -38,7 +45,8 @@ extension SlashCommand {
             description: "Start a new session",
             keybind: "⌘⇧S",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         ),
         SlashCommand(
             id: "session.share",
@@ -47,7 +55,8 @@ extension SlashCommand {
             description: "Share this session via link",
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .requiresSessionWithMessages
         ),
         SlashCommand(
             id: "session.unshare",
@@ -56,7 +65,8 @@ extension SlashCommand {
             description: "Remove sharing link",
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .requiresSessionWithMessages
         ),
         SlashCommand(
             id: "session.undo",
@@ -65,7 +75,8 @@ extension SlashCommand {
             description: "Remove the last message",
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .requiresSessionWithMessages
         ),
         SlashCommand(
             id: "session.redo",
@@ -74,7 +85,8 @@ extension SlashCommand {
             description: "Restore the last undone message",
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .requiresSessionWithMessages
         ),
         SlashCommand(
             id: "session.compact",
@@ -83,7 +95,8 @@ extension SlashCommand {
             description: "Reduce session size",
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .requiresSessionWithMessages
         ),
         SlashCommand(
             id: "session.fork",
@@ -92,7 +105,8 @@ extension SlashCommand {
             description: "Create a copy of this session",
             keybind: nil,
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .requiresSessionWithMessages
         ),
         SlashCommand(
             id: "terminal.toggle",
@@ -101,7 +115,8 @@ extension SlashCommand {
             description: "Show or hide the terminal panel",
             keybind: "⌃`",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         ),
         SlashCommand(
             id: "file.open",
@@ -110,7 +125,8 @@ extension SlashCommand {
             description: "Open a file from the project",
             keybind: "⌘K⌘P",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         ),
         SlashCommand(
             id: "model.choose",
@@ -119,7 +135,8 @@ extension SlashCommand {
             description: "Select a different model",
             keybind: "⌘'",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         ),
         SlashCommand(
             id: "agent.cycle",
@@ -128,7 +145,8 @@ extension SlashCommand {
             description: "Switch to the next agent",
             keybind: "⌘.",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         ),
         SlashCommand(
             id: "mcp.toggle",
@@ -137,7 +155,8 @@ extension SlashCommand {
             description: "Configure MCP servers",
             keybind: "⌘;",
             type: .builtin,
-            source: nil
+            source: nil,
+            availability: .always
         ),
     ]
 }

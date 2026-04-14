@@ -88,16 +88,7 @@ struct MainSessionDetailPane: View {
     }
 
     private var filteredSlashCommands: [SlashCommand] {
-        if slashQuery.isEmpty {
-            return SlashCommand.builtinCommands
-        }
-
-        let lowercasedQuery = slashQuery.lowercased()
-        return SlashCommand.builtinCommands.filter { command in
-            command.trigger.lowercased().contains(lowercasedQuery) ||
-            command.title.lowercased().contains(lowercasedQuery) ||
-            (command.description?.lowercased().contains(lowercasedQuery) ?? false)
-        }
+        model.composerStore.filteredSlashCommands
     }
 
     var body: some View {
@@ -108,19 +99,26 @@ struct MainSessionDetailPane: View {
         .ignoresSafeArea(edges: .top)
         .onAppear {
             model.ensureTerminalConnectedIfNeeded()
+            syncSlashCommandContext()
         }
         .onChange(of: selectedProject?.worktree) { _, _ in
             model.ensureTerminalConnectedIfNeeded()
             model.refreshModelCatalogForSelectedProject()
+            syncSlashCommandContext()
         }
         .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
             if isOpen { model.ensureTerminalConnectedIfNeeded() }
         }
         .onChange(of: model.workspaceStore.selectedProjectID) { _, _ in
             model.composerStore.refreshPlaceholder()
+            syncSlashCommandContext()
         }
         .onChange(of: selectedSessionID) { _, _ in
             model.composerStore.refreshPlaceholder()
+            syncSlashCommandContext()
+        }
+        .onChange(of: sessionDetailStore.selectedSessionMessages.count) { _, _ in
+            syncSlashCommandContext()
         }
     }
 
@@ -180,6 +178,31 @@ struct MainSessionDetailPane: View {
             Divider()
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .bottom) {
+                        if isSlashPopoverVisible {
+                            SlashCommandPopover(
+                                commands: filteredSlashCommands,
+                                selectedIndex: model.composerStore.selectedSlashCommandIndex,
+                                onSelect: { command in
+                                    model.executeSlashCommand(command)
+                                    isSlashPopoverVisible = false
+                                    slashQuery = ""
+                                    model.draftPrompt = ""
+                                },
+                                onHover: { index in
+                                    model.composerStore.selectedSlashCommandIndex = index
+                                }
+                            )
+                            .frame(maxWidth: Self.composerMaxWidth)
+                            .padding(.horizontal, Self.composerOuterPadding)
+                            .padding(.bottom, Self.composerContentGap)
+                            .onAppear {
+                                model.composerStore.selectedSlashCommandIndex = 0
+                            }
+                        }
+                    }
+
                 composer(maxHeight: composerMaxHeight)
                     .frame(maxWidth: Self.composerMaxWidth)
                     .padding(.horizontal, Self.composerOuterPadding)
@@ -275,6 +298,12 @@ struct MainSessionDetailPane: View {
         selectedSession == nil && selectedProject != nil
     }
 
+    private func syncSlashCommandContext() {
+        model.composerStore.hasActiveSession = selectedSession != nil
+        model.composerStore.hasMessages = !sessionDetailStore.selectedSessionMessages.isEmpty
+        model.composerStore.refreshFilteredSlashCommands()
+    }
+
     private var placeholderText: String {
         if isNewChat {
             return model.composerStore.currentPlaceholder
@@ -310,11 +339,13 @@ struct MainSessionDetailPane: View {
                         },
                         onSlashCommand: { query in
                             slashQuery = query
+                            model.composerStore.updateSlashQuery(query)
                             isSlashPopoverVisible = true
                         },
                         onSlashCommandDismiss: {
                             isSlashPopoverVisible = false
                             slashQuery = ""
+                            model.composerStore.hideSlashPopover()
                         }
                     )
                     .frame(height: resolvedPromptHeight)
