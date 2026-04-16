@@ -8,11 +8,36 @@ struct MainView: View {
     @State private var showingConnectionPopover = false
 
     var body: some View {
+        ZStack(alignment: .bottom) {
+            mainContent
+
+            if let notification = model.notification {
+                NotificationBanner(message: notification)
+                    .zIndex(1)
+                    .allowsHitTesting(false)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut(duration: 0.3), value: model.notification)
+        .onChange(of: model.notification) { _, newValue in
+            if newValue != nil {
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    model.notification = nil
+                }
+            }
+        }
+    }
+
+    private var mainContent: some View {
         NavigationSplitView(columnVisibility: $splitViewVisibility) {
             MainSidebarPane(model: model)
         } detail: {
             MainSessionDetailPane(
                 model: model,
+                workspaceStore: model.workspaceStore,
+                sessionDetailStore: model.sessionDetailStore,
                 splitViewVisibility: splitViewVisibility
             )
         }
@@ -234,6 +259,13 @@ struct MainView: View {
                     Button("Refresh") {
                         showingConnectionPopover = false
                         model.refresh()
+                    }
+                }
+
+                if model.selectedProfile?.kind == .localSidecar {
+                    Button("Restart Server") {
+                        showingConnectionPopover = false
+                        model.restartServer()
                     }
                 }
 

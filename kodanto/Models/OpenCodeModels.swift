@@ -309,6 +309,10 @@ struct OpenCodeSession: Decodable, Identifiable, Hashable {
     }
 }
 
+struct OpenCodeSessionShare: Decodable, Hashable {
+    let url: String
+}
+
 struct OpenCodePTY: Decodable, Identifiable, Hashable {
     enum Status: String, Decodable, Hashable {
         case running

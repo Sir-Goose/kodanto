@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AppKit
 
 @MainActor
 @Observable
@@ -39,6 +40,7 @@ final class KodantoAppModel {
     var showingConnectionSheet = false
     var showingConnectionsManager = false
     var showingDiagnostics = false
+    var notification: String?
     var isTerminalPanelOpen = false
     var terminalPanelHeight: Double = TerminalLayoutState.default.height
 
@@ -547,6 +549,25 @@ final class KodantoAppModel {
         }
     }
 
+    func restartServer() {
+        Task {
+            guard let profile = selectedProfile else { return }
+            guard profile.kind == .localSidecar else { return }
+            appendSidecarLog("Restarting server...\n")
+            do {
+                try await dependencies.sidecar.restart(profile: profile)
+                try await waitForServer(profile: profile)
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let health = try await client.health()
+                connectionState = .connected(version: health.version)
+                try await refreshAll(using: client, scope: .full)
+                startLiveSync(for: profile)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
     func refreshModelCatalogForSelectedProject() {
         guard connectionState.isConnected,
               let profile = selectedProfile,
@@ -715,10 +736,8 @@ final class KodantoAppModel {
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
                 let session: OpenCodeSession
-                let createdSessionJustNow: Bool
                 if let selectedSession {
                     session = selectedSession
-                    createdSessionJustNow = false
                 } else {
                     let createdSession = try await client.createSession(directory: project.worktree, title: nil)
                     _ = workspaceStore.upsertSession(createdSession, directory: project.worktree)
@@ -726,26 +745,15 @@ final class KodantoAppModel {
                     syncSelectionContext(resetSessionState: true)
                     try await loadSessionDetail(using: client)
                     session = selectedSession ?? createdSession
-                    createdSessionJustNow = true
                 }
 
-                if createdSessionJustNow {
-                    try await composerStore.submitPrompt(
-                        using: client,
-                        project: project,
-                        session: session
-                    ) {
-                        try await self.loadSessionDetail(using: client)
-                    }
-                } else {
-                    try await composerStore.submitPrompt(
-                        using: client,
-                        project: project,
-                        session: session
-                    ) {
-                        try await self.loadSessionDetail(using: client)
-                        try await self.loadSessions(for: project, using: client)
-                    }
+                try await composerStore.submitPrompt(
+                    using: client,
+                    project: project,
+                    session: session
+                ) {
+                    try await self.loadSessionDetail(using: client)
+                    try await self.loadSessions(for: project, using: client)
                 }
             } catch {
                 if let profile = selectedProfile {
@@ -770,6 +778,224 @@ final class KodantoAppModel {
                 connectionState = .failed(error.localizedDescription)
             }
         }
+    }
+
+    var selectedSlashCommand: SlashCommand? {
+        composerStore.selectedSlashCommand
+    }
+
+    func selectNextSlashCommand() {
+        composerStore.selectNextSlashCommand()
+    }
+
+    func selectPreviousSlashCommand() {
+        composerStore.selectPreviousSlashCommand()
+    }
+
+    func executeSlashCommand(_ command: SlashCommand) {
+        switch command.id {
+        case "session.new":
+            handleNewSession()
+        case "session.share":
+            handleShareSession()
+        case "session.unshare":
+            handleUnshareSession()
+        case "session.undo":
+            handleUndo()
+        case "session.redo":
+            handleRedo()
+        case "session.compact":
+            handleCompact()
+        case "session.fork":
+            handleFork()
+        case "terminal.toggle":
+            isTerminalPanelOpen.toggle()
+        case "file.open":
+            break
+        case "model.choose":
+            break
+        case "agent.cycle":
+            handleAgentCycle()
+        case "mcp.toggle":
+            break
+        default:
+            break
+        }
+    }
+
+    private func handleNewSession() {
+        guard let projectID = workspaceStore.selectedProjectID else { return }
+        workspaceStore.clearSelectedSession()
+        syncSelectionContext(resetSessionState: true)
+    }
+
+    private func handleShareSession() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let share = try await client.shareSession(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+                
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(share.url, forType: .string)
+                notification = "Share link copied to clipboard"
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleUnshareSession() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.unshareSession(sessionID: session.id, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+                notification = "Session unshared"
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleUndo() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let messages = try await client.messages(sessionID: session.id, directory: project.worktree)
+
+                var lastUserMessageID: String?
+                for msg in messages {
+                    if case .user = msg.info,
+                       session.revert?.messageID == nil || msg.id < session.revert!.messageID {
+                        lastUserMessageID = msg.id
+                    }
+                }
+
+                guard let messageID = lastUserMessageID else { return }
+
+                let updatedSession = try await client.revert(sessionID: session.id, messageID: messageID, directory: project.worktree)
+                _ = workspaceStore.upsertSession(updatedSession, directory: project.worktree)
+                try await loadSessionDetail(using: client)
+                notification = "Message removed"
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleRedo() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let messages = try await client.messages(sessionID: session.id, directory: project.worktree)
+
+                if let revertMessageID = session.revert?.messageID,
+                   let nextUserMessageID = messages.first(where: {
+                       if case .user = $0.info {
+                           return $0.id > revertMessageID
+                       }
+                       return false
+                   })?.id {
+                    let updatedSession = try await client.revert(
+                        sessionID: session.id,
+                        messageID: nextUserMessageID,
+                        directory: project.worktree
+                    )
+                    _ = workspaceStore.upsertSession(updatedSession, directory: project.worktree)
+                } else {
+                    let updatedSession = try await client.unrevert(sessionID: session.id, directory: project.worktree)
+                    _ = workspaceStore.upsertSession(updatedSession, directory: project.worktree)
+                }
+
+                try await loadSessionDetail(using: client)
+                notification = "Message restored"
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleCompact() {
+        Task {
+            guard let profile = selectedProfile else {
+                notification = "No profile selected"
+                return
+            }
+            guard let project = selectedProject else {
+                notification = "No project selected"
+                return
+            }
+            guard let session = selectedSession else {
+                notification = "No session selected"
+                return
+            }
+            guard let model = composerStore.selectedModel else {
+                notification = "No model selected"
+                return
+            }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                try await client.compactSession(
+                    sessionID: session.id,
+                    directory: project.worktree,
+                    providerID: model.providerID,
+                    modelID: model.modelID
+                )
+                try await loadSessionDetail(using: client)
+                notification = "Session compacted"
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleFork() {
+        Task {
+            guard let profile = selectedProfile,
+                  let project = selectedProject,
+                  let session = selectedSession
+            else { return }
+
+            do {
+                let client = dependencies.apiFactory.makeService(profile: profile)
+                let forkedSession = try await client.forkSession(sessionID: session.id, directory: project.worktree)
+                _ = workspaceStore.upsertSession(forkedSession, directory: project.worktree)
+                _ = workspaceStore.selectSession(forkedSession.id, in: project.id)
+                syncSelectionContext(resetSessionState: true)
+                try await loadSessionDetail(using: client)
+            } catch {
+                connectionState = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func handleAgentCycle() {
+        guard !composerStore.availablePrimaryAgents.isEmpty else { return }
+        let currentIndex = composerStore.availablePrimaryAgents.firstIndex(where: { $0.name == composerStore.selectedAgentName }) ?? -1
+        let nextIndex = (currentIndex + 1) % composerStore.availablePrimaryAgents.count
+        composerStore.selectAgent(composerStore.availablePrimaryAgents[nextIndex].name)
     }
 
     func selectSession(_ sessionID: OpenCodeSession.ID, in projectID: OpenCodeProject.ID) {

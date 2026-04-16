@@ -198,6 +198,56 @@ struct OpenCodeAPIClient {
         )
     }
 
+    func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare {
+        try await request(
+            path: "/session/\(sessionID)/share",
+            method: "POST",
+            directory: directory
+        )
+    }
+
+    func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare {
+        try await request(
+            path: "/session/\(sessionID)/share",
+            method: "DELETE",
+            directory: directory
+        )
+    }
+
+    func revert(sessionID: String, messageID: String, directory: String) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)/revert",
+            method: "POST",
+            directory: directory,
+            body: AnyEncodable(RevertBody(messageID: messageID, partID: nil))
+        )
+    }
+
+    func unrevert(sessionID: String, directory: String) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)/unrevert",
+            method: "POST",
+            directory: directory
+        )
+    }
+
+    func compactSession(sessionID: String, directory: String, providerID: String, modelID: String) async throws {
+        try await requestNoContent(
+            path: "/session/\(sessionID)/summarize",
+            method: "POST",
+            directory: directory,
+            body: AnyEncodable(SummarizeBody(providerID: providerID, modelID: modelID, auto: false))
+        )
+    }
+
+    func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession {
+        try await request(
+            path: "/session/\(sessionID)/fork",
+            method: "POST",
+            directory: directory
+        )
+    }
+
     func replyToPermission(requestID: String, directory: String, reply: String) async throws {
         try await requestNoContent(
             path: "/permission/\(requestID)/reply",
@@ -449,6 +499,17 @@ struct OpenCodeAPIClient {
 
         return request
     }
+}
+
+private struct RevertBody: Encodable {
+    let messageID: String
+    let partID: String?
+}
+
+private struct SummarizeBody: Encodable {
+    let providerID: String
+    let modelID: String
+    let auto: Bool
 }
 
 enum OpenCodeAPIError: LocalizedError {

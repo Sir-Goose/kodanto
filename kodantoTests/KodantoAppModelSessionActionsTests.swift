@@ -141,6 +141,27 @@ final class KodantoAppModelSessionActionsTests: XCTestCase {
         XCTAssertTrue(renderedTextParts.contains("Hello from first prompt"))
     }
 
+    func testSendPromptFromNewSessionRecoversWhenFirstPostPromptFetchIsStale() async throws {
+        let project = TestFixtures.project(id: "project-1", worktree: "/tmp/project-1", updatedAt: 100)
+        let service = MockOpenCodeAPIService(sessions: [])
+        service.withholdFirstPostPromptMessagesFetch()
+
+        let model = makeModel(apiService: service)
+        model.workspaceStore.applyLoadedProjects([project], profileID: model.selectedProfileID)
+        model.workspaceStore.selectProject(project.id)
+
+        model.createSession(in: project.id)
+        model.draftPrompt = "Hello with delayed persistence"
+        model.sendPrompt()
+
+        let createCalled = await waitUntil { service.createCalls.count == 1 }
+        XCTAssertTrue(createCalled)
+        let promptCalled = await waitUntil { service.promptCalls.count == 1 }
+        XCTAssertTrue(promptCalled)
+        let renderedMessages = await waitUntil { !model.selectedSessionMessages.isEmpty }
+        XCTAssertTrue(renderedMessages)
+    }
+
     private func waitUntil(
         attempts: Int = 120,
         interval: Duration = .milliseconds(10),
@@ -216,10 +237,17 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
     private(set) var todosRequests: [(sessionID: String, directory: String)] = []
     private var sessionsByID: [String: OpenCodeSession]
     private var messageEnvelopesBySessionID: [String: [OpenCodeMessageEnvelope]] = [:]
+    private var pendingMessageEnvelopesBySessionID: [String: [OpenCodeMessageEnvelope]] = [:]
+    private var sessionIDsWithDeferredMessageFetch: Set<String> = []
     private var availableProjects: [OpenCodeProject]
     private let availablePathInfo: OpenCodePathInfo
     private var initializedProjectsByDirectory: [String: OpenCodeProject]
     private var sessionSerial = 0
+    private var shouldWithholdFirstPostPromptMessagesFetch = false
+
+    func withholdFirstPostPromptMessagesFetch() {
+        shouldWithholdFirstPostPromptMessagesFetch = true
+    }
 
     init(
         sessions: [OpenCodeSession],
@@ -286,6 +314,17 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
 
     func messages(sessionID: String, directory: String) async throws -> [OpenCodeMessageEnvelope] {
         messagesRequests.append((sessionID, directory))
+
+        if sessionIDsWithDeferredMessageFetch.contains(sessionID) {
+            sessionIDsWithDeferredMessageFetch.remove(sessionID)
+            return messageEnvelopesBySessionID[sessionID] ?? []
+        }
+
+        if let pending = pendingMessageEnvelopesBySessionID[sessionID], !pending.isEmpty {
+            messageEnvelopesBySessionID[sessionID, default: []].append(contentsOf: pending)
+            pendingMessageEnvelopesBySessionID.removeValue(forKey: sessionID)
+        }
+
         return messageEnvelopesBySessionID[sessionID] ?? []
     }
 
@@ -408,10 +447,22 @@ private final class MockOpenCodeAPIService: OpenCodeAPIService {
                 )
             ]
         )
-        messageEnvelopesBySessionID[sessionID, default: []].append(envelope)
+
+        if shouldWithholdFirstPostPromptMessagesFetch {
+            pendingMessageEnvelopesBySessionID[sessionID, default: []].append(envelope)
+            sessionIDsWithDeferredMessageFetch.insert(sessionID)
+        } else {
+            messageEnvelopesBySessionID[sessionID, default: []].append(envelope)
+        }
     }
     func disposeInstance(directory: String?) async throws { fatalError("unused") }
     func abortSession(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
+    func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
+    func undo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func redo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func compactSession(sessionID: String, directory: String, providerID: String, modelID: String) async throws { fatalError("unused") }
+    func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }

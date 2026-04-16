@@ -3,12 +3,16 @@ import SwiftUI
 
 struct MainSessionDetailPane: View {
     @Bindable var model: KodantoAppModel
+    @Bindable var workspaceStore: WorkspaceStore
+    @Bindable var sessionDetailStore: SessionDetailStore
     let splitViewVisibility: NavigationSplitViewVisibility
 
     @State private var promptEditorHeight: CGFloat = 0
     @State private var transcriptDisclosureStore = TranscriptDisclosureStore()
     @State private var userScrolledUp = false
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
+    @State private var isSlashPopoverVisible = false
+    @State private var slashQuery = ""
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -29,27 +33,38 @@ struct MainSessionDetailPane: View {
     }
 
     private var selectedProject: OpenCodeProject? {
-        model.workspaceStore.selectedProject
+        workspaceStore.selectedProject
     }
 
     private var selectedSession: OpenCodeSession? {
-        model.workspaceStore.selectedSession
+        workspaceStore.selectedSession
     }
 
     private var selectedSessionID: OpenCodeSession.ID? {
-        model.workspaceStore.selectedSessionID
+        workspaceStore.selectedSessionID
     }
 
     private var selectedSessionMessages: [OpenCodeMessageEnvelope] {
-        model.sessionDetailStore.selectedSessionMessages
+        sessionDetailStore.selectedSessionMessages
     }
 
-    private var selectedSessionTurns: [TranscriptTurn] {
-        model.sessionDetailStore.selectedSessionTurns
+    private var selectedSessionRevertMessageID: String? {
+        selectedSession?.revert?.messageID
+    }
+
+    private var visibleSessionMessages: [OpenCodeMessageEnvelope] {
+        guard let revertMessageID = selectedSessionRevertMessageID else {
+            return selectedSessionMessages
+        }
+        return selectedSessionMessages.filter { $0.id < revertMessageID }
+    }
+
+    private var visibleSessionTurns: [TranscriptTurn] {
+        TranscriptTurn.build(from: visibleSessionMessages)
     }
 
     private var sessionTodos: [OpenCodeTodo] {
-        model.sessionDetailStore.sessionTodos
+        sessionDetailStore.sessionTodos
     }
 
     private var permissions: [OpenCodePermissionRequest] {
@@ -69,7 +84,11 @@ struct MainSessionDetailPane: View {
     }
 
     private var isSelectedSessionRunning: Bool {
-        model.workspaceStore.isSelectedSessionRunning
+        workspaceStore.isSelectedSessionRunning
+    }
+
+    private var filteredSlashCommands: [SlashCommand] {
+        model.composerStore.filteredSlashCommands
     }
 
     var body: some View {
@@ -80,19 +99,26 @@ struct MainSessionDetailPane: View {
         .ignoresSafeArea(edges: .top)
         .onAppear {
             model.ensureTerminalConnectedIfNeeded()
+            syncSlashCommandContext()
         }
         .onChange(of: selectedProject?.worktree) { _, _ in
             model.ensureTerminalConnectedIfNeeded()
             model.refreshModelCatalogForSelectedProject()
+            syncSlashCommandContext()
         }
         .onChange(of: model.isTerminalPanelOpen) { _, isOpen in
             if isOpen { model.ensureTerminalConnectedIfNeeded() }
         }
         .onChange(of: model.workspaceStore.selectedProjectID) { _, _ in
             model.composerStore.refreshPlaceholder()
+            syncSlashCommandContext()
         }
         .onChange(of: selectedSessionID) { _, _ in
             model.composerStore.refreshPlaceholder()
+            syncSlashCommandContext()
+        }
+        .onChange(of: sessionDetailStore.selectedSessionMessages.count) { _, _ in
+            syncSlashCommandContext()
         }
     }
 
@@ -152,6 +178,32 @@ struct MainSessionDetailPane: View {
             Divider()
             VStack(spacing: 0) {
                 Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .overlay(alignment: .bottom) {
+                        if isSlashPopoverVisible {
+                            SlashCommandPopover(
+                                commands: filteredSlashCommands,
+                                selectedIndex: model.composerStore.selectedSlashCommandIndex,
+                                onSelect: { command in
+                                    model.executeSlashCommand(command)
+                                    isSlashPopoverVisible = false
+                                    slashQuery = ""
+                                    model.draftPrompt = ""
+                                    model.composerStore.hideSlashPopover()
+                                },
+                                onHover: { index in
+                                    model.composerStore.selectedSlashCommandIndex = index
+                                }
+                            )
+                            .frame(maxWidth: Self.composerMaxWidth)
+                            .padding(.horizontal, Self.composerOuterPadding)
+                            .padding(.bottom, Self.composerContentGap)
+                            .onAppear {
+                                model.composerStore.selectedSlashCommandIndex = 0
+                            }
+                        }
+                    }
+
                 composer(maxHeight: composerMaxHeight)
                     .frame(maxWidth: Self.composerMaxWidth)
                     .padding(.horizontal, Self.composerOuterPadding)
@@ -171,7 +223,7 @@ struct MainSessionDetailPane: View {
                     transcriptTurns
                 }
                 .scrollTargetLayout()
-                .id("transcript-\(selectedSessionID ?? "none")")
+                .id("transcript-\(selectedSessionID ?? "none")-\(sessionDetailStore.selectedSessionTranscriptRevision)-\(selectedSessionRevertMessageID ?? "none")")
                 .padding()
                 .frame(maxWidth: Self.messageColumnMaxWidth, alignment: .leading)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -199,11 +251,34 @@ struct MainSessionDetailPane: View {
                     scrollPosition.scrollTo(edge: .bottom)
                 }
             }
+            .overlay(alignment: .bottom) {
+                if isSlashPopoverVisible {
+                    SlashCommandPopover(
+                        commands: filteredSlashCommands,
+                        selectedIndex: model.composerStore.selectedSlashCommandIndex,
+                        onSelect: { command in
+                            model.executeSlashCommand(command)
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                            model.draftPrompt = ""
+                        },
+                        onHover: { index in
+                            model.composerStore.selectedSlashCommandIndex = index
+                        }
+                    )
+                    .frame(maxWidth: Self.composerMaxWidth)
+                    .padding(.horizontal, Self.composerOuterPadding)
+                    .padding(.bottom, Self.composerContentGap)
+                    .onAppear {
+                        model.composerStore.selectedSlashCommandIndex = 0
+                    }
+                }
+            }
         }
     }
 
     private var transcriptTurns: some View {
-        let turns = selectedSessionTurns
+        let turns = visibleSessionTurns
         return ForEach(turns) { turn in
             TranscriptTurnView(
                 turn: turn,
@@ -224,6 +299,12 @@ struct MainSessionDetailPane: View {
         selectedSession == nil && selectedProject != nil
     }
 
+    private func syncSlashCommandContext() {
+        model.composerStore.hasActiveSession = selectedSession != nil
+        model.composerStore.hasMessages = !sessionDetailStore.selectedSessionMessages.isEmpty
+        model.composerStore.refreshFilteredSlashCommands()
+    }
+
     private var placeholderText: String {
         if isNewChat {
             return model.composerStore.currentPlaceholder
@@ -235,64 +316,128 @@ struct MainSessionDetailPane: View {
     private func composer(maxHeight: CGFloat) -> some View {
         let resolvedPromptHeight = min(max(promptEditorHeight, promptMinimumHeight), maxHeight)
 
-        return VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                AutoSizingPromptEditor(
-                    text: $model.draftPrompt,
-                    measuredHeight: $promptEditorHeight,
-                    font: Self.composerNSFont,
-                    textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
-                    maxHeight: maxHeight
-                ) {
-                    guard model.canSendPrompt else { return }
-                    model.sendPrompt()
-                }
-                .frame(height: resolvedPromptHeight)
-
-                if model.draftPrompt.isEmpty {
-                    Text(placeholderText)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, Self.composerHorizontalPadding)
-                        .padding(.vertical, Self.composerVerticalPadding)
-                        .allowsHitTesting(false)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .frame(height: resolvedPromptHeight, alignment: .topLeading)
-
-            HStack(alignment: .center, spacing: 12) {
-                ComposerControlsRow(model: model)
-
-                Button {
-                    if isSelectedSessionRunning {
-                        model.abortSession()
-                    } else {
-                        model.sendPrompt()
+        return ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack(alignment: .topLeading) {
+                    AutoSizingPromptEditor(
+                        text: $model.draftPrompt,
+                        measuredHeight: $promptEditorHeight,
+                        font: Self.composerNSFont,
+                        textInset: NSSize(width: Self.composerHorizontalPadding, height: Self.composerVerticalPadding),
+                        maxHeight: maxHeight,
+                        onSubmit: {
+                            if isSlashPopoverVisible {
+                                if let command = filteredSlashCommands.first {
+                                    model.executeSlashCommand(command)
+                                    isSlashPopoverVisible = false
+                                    slashQuery = ""
+                                    model.draftPrompt = ""
+                                }
+                            } else {
+                                guard model.canSendPrompt else { return }
+                                model.sendPrompt()
+                            }
+                        },
+                        onSlashCommand: { query in
+                            slashQuery = query
+                            model.composerStore.updateSlashQuery(query)
+                            isSlashPopoverVisible = true
+                        },
+                        onSlashCommandDismiss: {
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                            model.composerStore.hideSlashPopover()
+                        }
+                    )
+                    .frame(height: resolvedPromptHeight)
+                    .onKeyPress(.escape) {
+                        if isSlashPopoverVisible {
+                            isSlashPopoverVisible = false
+                            slashQuery = ""
+                            return .handled
+                        }
+                        return .ignored
                     }
-                } label: {
-                    Image(systemName: isSelectedSessionRunning ? "stop.fill" : "paperplane.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 34, height: 34)
+                    .onKeyPress(.upArrow) {
+                        if isSlashPopoverVisible {
+                            model.selectPreviousSlashCommand()
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.downArrow) {
+                        if isSlashPopoverVisible {
+                            model.selectNextSlashCommand()
+                            return .handled
+                        }
+                        return .ignored
+                    }
+                    .onKeyPress(.tab) {
+                        if isSlashPopoverVisible {
+                            if let command = model.selectedSlashCommand {
+                                model.executeSlashCommand(command)
+                                isSlashPopoverVisible = false
+                                slashQuery = ""
+                                model.draftPrompt = ""
+                            }
+                            return .handled
+                        }
+                        return .ignored
+                    }
+
+                    if model.draftPrompt.isEmpty {
+                        Text(placeholderText)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, Self.composerHorizontalPadding)
+                            .padding(.vertical, Self.composerVerticalPadding)
+                            .allowsHitTesting(false)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .buttonBorderShape(.circle)
-                .controlSize(.regular)
-                .disabled(!isSelectedSessionRunning && !model.canSendPrompt)
-                .help(isSelectedSessionRunning ? "Stop" : "Send")
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .frame(height: resolvedPromptHeight, alignment: .topLeading)
+
+                HStack(alignment: .center, spacing: 12) {
+                    ComposerControlsRow(model: model)
+
+                    Button {
+                        if isSelectedSessionRunning {
+                            model.abortSession()
+                        } else if isSlashPopoverVisible {
+                            if let command = model.selectedSlashCommand {
+                                model.executeSlashCommand(command)
+                                isSlashPopoverVisible = false
+                                slashQuery = ""
+                                model.draftPrompt = ""
+                            }
+                        } else {
+                            model.sendPrompt()
+                        }
+                    } label: {
+                        Image(systemName: isSelectedSessionRunning ? "stop.fill" : "paperplane.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 34, height: 34)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .disabled(!isSelectedSessionRunning && !model.canSendPrompt && !isSlashPopoverVisible)
+                    .help(isSelectedSessionRunning ? "Stop" : (isSlashPopoverVisible ? "Select Command" : "Send"))
+                }
             }
+            .frame(maxWidth: .infinity)
+            .padding(Self.composerInnerPadding)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18))
+            )
+            .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
         }
-        .padding(Self.composerInnerPadding)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.18))
-        )
-        .shadow(color: .black.opacity(0.08), radius: 16, y: 8)
     }
 
     private func bottomPanel(maxHeight: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: Self.composerContentGap) {
+        return VStack(alignment: .leading, spacing: Self.composerContentGap) {
             SessionTodoDockView(todos: sessionTodos)
                 .id(selectedSessionID ?? "session-todo-dock")
 
@@ -330,9 +475,16 @@ struct MainSessionDetailPane: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if let shareURL = session.share?.url {
-                    Label(shareURL, systemImage: "link")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Button {
+                        if let url = URL(string: shareURL) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label(shareURL, systemImage: "link")
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
