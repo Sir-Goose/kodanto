@@ -23,6 +23,7 @@ final class SessionRequestStore {
     private let permissionAutoAcceptStore: PermissionAutoAcceptStoring
     private var permissionAutoAcceptValues: [String: Bool]
     private var autoRespondingPermissionIDs: Set<String> = []
+    private var failedAutoRespondPermissionIDs: Set<String> = []
     private var selectedSessionID: String?
     private var selectedDirectory: String?
 
@@ -68,6 +69,7 @@ final class SessionRequestStore {
         permissions = []
         questions = []
         autoRespondingPermissionIDs = []
+        failedAutoRespondPermissionIDs = []
     }
 
     func replaceRequests(
@@ -76,6 +78,10 @@ final class SessionRequestStore {
     ) {
         permissions = loadedPermissions.filter { $0.sessionID == selectedSessionID }
         questions = loadedQuestions.filter { $0.sessionID == selectedSessionID }
+
+        let permissionIDs = Set(permissions.map(\.id))
+        autoRespondingPermissionIDs = autoRespondingPermissionIDs.intersection(permissionIDs)
+        failedAutoRespondPermissionIDs = failedAutoRespondPermissionIDs.intersection(permissionIDs)
     }
 
     func togglePermissionAutoAccept() {
@@ -92,6 +98,9 @@ final class SessionRequestStore {
         }
         permissionAutoAcceptValues[key] = enabled
         permissionAutoAcceptStore.save(permissionAutoAcceptValues)
+        if enabled {
+            failedAutoRespondPermissionIDs = []
+        }
     }
 
     func submitPermissionResponse(
@@ -139,6 +148,7 @@ final class SessionRequestStore {
         guard sessionID == selectedSessionID else { return }
         permissions.removeAll { $0.id == requestID }
         autoRespondingPermissionIDs.remove(requestID)
+        failedAutoRespondPermissionIDs.remove(requestID)
     }
 
     func upsertQuestion(_ request: OpenCodeQuestionRequest) {
@@ -162,7 +172,9 @@ final class SessionRequestStore {
         guard isPermissionAutoAcceptEnabled else { return }
 
         let pendingRequests = permissions.filter { request in
-            request.sessionID == selectedSessionID && !autoRespondingPermissionIDs.contains(request.id)
+            request.sessionID == selectedSessionID &&
+                !autoRespondingPermissionIDs.contains(request.id) &&
+                !failedAutoRespondPermissionIDs.contains(request.id)
         }
         guard !pendingRequests.isEmpty else { return }
 
@@ -180,6 +192,7 @@ final class SessionRequestStore {
                 do {
                     try await submit(request, .once)
                 } catch {
+                    self.failedAutoRespondPermissionIDs.insert(request.id)
                     onError(error)
                 }
             }

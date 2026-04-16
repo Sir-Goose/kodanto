@@ -570,11 +570,11 @@ final class KodantoAppModel {
 
     func refreshModelCatalogForSelectedProject() {
         guard connectionState.isConnected,
-              let profile = selectedProfile,
-              let directory = selectedProject?.worktree
+              let profile = selectedProfile
         else { return }
 
         let client = dependencies.apiFactory.makeService(profile: profile)
+        let directory = modelCatalogDirectoryForCurrentSelection()
 
         Task {
             do {
@@ -1128,7 +1128,7 @@ final class KodantoAppModel {
             do {
                 try await composerStore.refreshModelCatalog(
                     using: client,
-                    directory: selectedProject?.worktree
+                    directory: modelCatalogDirectoryForCurrentSelection()
                 )
             } catch {
                 composerStore.modelLoadError = error.localizedDescription
@@ -1136,7 +1136,7 @@ final class KodantoAppModel {
         }
 
         let projectsToRefresh = projects.filter { project in
-            project.id == selectedProjectID || workspaceStore.hasLoadedSessions(for: project)
+            workspaceStore.hasLoadedSessions(for: project)
         }
 
         if projectsToRefresh.isEmpty {
@@ -1283,6 +1283,12 @@ final class KodantoAppModel {
         sessionRequestStore.updateSelection(sessionID: selectedSessionID, directory: selectedProject?.worktree)
         terminalStore.setActiveDirectory(selectedProject?.worktree)
         ensureTerminalConnectedIfNeeded()
+    }
+
+    private func modelCatalogDirectoryForCurrentSelection() -> String? {
+        guard let project = selectedProject else { return nil }
+        guard workspaceStore.hasLoadedSessions(for: project) else { return nil }
+        return project.worktree
     }
 
     private func waitForServer(profile: ServerProfile) async throws {
