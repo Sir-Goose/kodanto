@@ -189,6 +189,7 @@ struct MainSessionDetailPane: View {
                                     isSlashPopoverVisible = false
                                     slashQuery = ""
                                     model.draftPrompt = ""
+                                    model.composerStore.hideSlashPopover()
                                 },
                                 onHover: { index in
                                     model.composerStore.selectedSlashCommandIndex = index
