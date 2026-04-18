@@ -3,7 +3,10 @@ import SwiftUI
 struct ComposerControlsRow: View {
     @Bindable var model: KodantoAppModel
     @State private var isHovered = false
-    @State private var isShowingPicker = false
+
+    private var isShowingPicker: Bool {
+        model.composerStore.isModelPickerVisible
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -17,7 +20,7 @@ struct ComposerControlsRow: View {
                 }
             } else if let selectedModel = model.selectedModel {
                 Button {
-                    isShowingPicker.toggle()
+                    model.composerStore.showModelPicker()
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "cpu")
@@ -48,13 +51,20 @@ struct ComposerControlsRow: View {
                 .onHover { hovering in
                     isHovered = hovering
                 }
-                .popover(isPresented: $isShowingPicker, arrowEdge: .bottom) {
+                .popover(isPresented: Binding(
+                    get: { model.composerStore.isModelPickerVisible },
+                    set: { newValue in
+                        if !newValue {
+                            model.composerStore.hideModelPicker()
+                        }
+                    }
+                ), arrowEdge: .bottom) {
                     ModelPickerPopover(
                         groups: model.availableModelGroups,
                         selectedModelID: selectedModel.id
                     ) { option in
                         model.selectModel(option.id)
-                        isShowingPicker = false
+                        model.composerStore.hideModelPicker()
                     }
                 }
 
@@ -79,7 +89,7 @@ struct ComposerControlsRow: View {
     }
 
     private var modelPickerBackground: Color {
-        if isShowingPicker {
+        if model.composerStore.isModelPickerVisible {
             return Color.accentColor.opacity(0.12)
         }
 

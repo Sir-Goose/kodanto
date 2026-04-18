@@ -24,6 +24,7 @@ final class ComposerStore {
     var selectedSlashCommandIndex: Int = 0
     var slashQuery: String = ""
     var isSlashPopoverVisible: Bool = false
+    var isModelPickerVisible: Bool = false
     var hasActiveSession: Bool = false
     var hasMessages: Bool = false
 
@@ -123,6 +124,14 @@ final class ComposerStore {
         slashQuery = ""
         filteredSlashCommands = contextAwareCommands
         selectedSlashCommandIndex = 0
+    }
+
+    func showModelPicker() {
+        isModelPickerVisible = true
+    }
+
+    func hideModelPicker() {
+        isModelPickerVisible = false
     }
 
     func selectNextSlashCommand() {

@@ -813,7 +813,7 @@ final class KodantoAppModel {
         case "file.open":
             break
         case "model.choose":
-            break
+            composerStore.showModelPicker()
         case "agent.cycle":
             handleAgentCycle()
         case "mcp.toggle":
