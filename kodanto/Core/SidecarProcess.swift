@@ -38,6 +38,12 @@ final class SidecarProcess {
         let process = Process()
         process.executableURL = executable
         process.arguments = ["serve", "--hostname", host, "--port", String(port)]
+        // opencode may bootstrap an instance in the process working directory for
+        // non-directory-scoped API calls (for example /path, /config/providers).
+        // Keep it in a neutral temp location to avoid repeated macOS TCC prompts
+        // for unrelated user folders.
+        let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        process.currentDirectoryURL = temporaryDirectory
 
         var environment = ProcessInfo.processInfo.environment
 

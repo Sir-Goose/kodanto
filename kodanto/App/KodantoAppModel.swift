@@ -824,7 +824,7 @@ final class KodantoAppModel {
     }
 
     private func handleNewSession() {
-        guard let projectID = workspaceStore.selectedProjectID else { return }
+        guard workspaceStore.selectedProjectID != nil else { return }
         workspaceStore.clearSelectedSession()
         syncSelectionContext(resetSessionState: true)
     }
@@ -859,7 +859,7 @@ final class KodantoAppModel {
 
             do {
                 let client = dependencies.apiFactory.makeService(profile: profile)
-                try await client.unshareSession(sessionID: session.id, directory: project.worktree)
+                _ = try await client.unshareSession(sessionID: session.id, directory: project.worktree)
                 try await loadSessionDetail(using: client)
                 notification = "Session unshared"
             } catch {
