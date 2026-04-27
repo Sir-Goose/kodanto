@@ -1,1 +1,8 @@
 .build/
+.sourcekit-lsp/
+DerivedData/
+build/
+scripts/
+random_internet_text_160k_tokens.txt
+random_internet_text_160k_tokens.meta.txt
+tmp_test.txt
