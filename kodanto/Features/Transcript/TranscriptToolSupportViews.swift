@@ -332,23 +332,15 @@ struct FileDiffBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !fileDiff.before.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Before")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    MonospaceBlock(text: fileDiff.before)
-                }
-            }
+            DiffViewer(
+                diffText: DiffParserService.computeDiff(
+                    from: fileDiff.before,
+                    to: fileDiff.after,
+                    filePath: fileDiff.file
+                )
+            )
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("After")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                MonospaceBlock(text: fileDiff.after)
-            }
-
-            ToolBadges(badges: ["+\(fileDiff.additions)", "-\(fileDiff.deletions)"])
+            DiffStatsBadge(additions: fileDiff.additions, deletions: fileDiff.deletions)
         }
     }
 }
@@ -430,22 +422,8 @@ struct PatchFileDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !file.before.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Before")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    MonospaceBlock(text: file.before)
-                }
-            }
-
-            if !file.after.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("After")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    MonospaceBlock(text: file.after)
-                }
+            if !file.diff.isEmpty {
+                DiffViewer(diffText: file.diff)
             }
 
             DiagnosticsBlock(diagnostics: diagnostics)
