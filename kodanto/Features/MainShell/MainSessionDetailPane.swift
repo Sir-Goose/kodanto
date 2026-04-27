@@ -13,6 +13,7 @@ struct MainSessionDetailPane: View {
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var isSlashPopoverVisible = false
     @State private var slashQuery = ""
+    @State private var sessionReviewStore = SessionReviewStore()
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -120,6 +121,20 @@ struct MainSessionDetailPane: View {
         .onChange(of: sessionDetailStore.selectedSessionMessages.count) { _, _ in
             syncSlashCommandContext()
         }
+        .onChange(of: sessionDetailStore.selectedSessionMessages.count) { _, _ in
+            sessionReviewStore.updateDiffs(
+                sessionDetailStore.reviewDiffs,
+                messageCount: sessionDetailStore.selectedSessionMessages.count
+            )
+        }
+        .onChange(of: model.isReviewPanelOpen) { _, isOpen in
+            sessionReviewStore.isVisible = isOpen
+        }
+        .onChange(of: sessionReviewStore.isVisible) { _, isVisible in
+            if model.isReviewPanelOpen != isVisible {
+                model.isReviewPanelOpen = isVisible
+            }
+        }
     }
 
     @ViewBuilder
@@ -149,22 +164,32 @@ struct MainSessionDetailPane: View {
         composerMaxHeight: CGFloat,
         availableHeight: CGFloat
     ) -> some View {
-        VStack(spacing: 0) {
-            header(for: session)
-            Divider()
-
+        HStack(spacing: 0) {
             VStack(spacing: 0) {
-                transcriptPanel
+                header(for: session)
+                Divider()
 
-                bottomPanel(maxHeight: composerMaxHeight)
-                    .frame(maxWidth: Self.composerMaxWidth)
-                    .padding(.horizontal, Self.composerOuterPadding)
-                    .padding(.bottom, Self.composerOuterPadding)
+                VStack(spacing: 0) {
+                    transcriptPanel
 
-                TerminalPanelView(model: model, availableHeight: availableHeight)
+                    bottomPanel(maxHeight: composerMaxHeight)
+                        .frame(maxWidth: Self.composerMaxWidth)
+                        .padding(.horizontal, Self.composerOuterPadding)
+                        .padding(.bottom, Self.composerOuterPadding)
+
+                    TerminalPanelView(model: model, availableHeight: availableHeight)
+                }
+            }
+            .clipped()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            if sessionReviewStore.isVisible {
+                Divider()
+                SessionReviewPanel(store: sessionReviewStore)
+                    .frame(width: 300)
+                    .frame(maxHeight: .infinity)
             }
         }
-        .clipped()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -487,6 +512,7 @@ struct MainSessionDetailPane: View {
                     .buttonStyle(.plain)
                 }
             }
+
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()

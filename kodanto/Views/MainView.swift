@@ -79,6 +79,7 @@ struct MainView: View {
                 contextUsageView(usage)
             }
             terminalToggleButton
+            changesToggleButton
             connectionStatusButton
         }
     }
@@ -143,6 +144,34 @@ struct MainView: View {
         .disabled(!model.canShowTerminal)
         .opacity(model.canShowTerminal ? 1 : 0.55)
         .help("Toggle Terminal")
+    }
+
+    private var changesToggleButton: some View {
+        let style = ChangesToggleButtonStyle.resolve(
+            isOpen: model.isReviewPanelOpen,
+            hasChanges: !model.sessionDetailStore.reviewDiffs.isEmpty
+        )
+
+        return Button {
+            model.toggleReviewPanel()
+        } label: {
+            Image(systemName: style.symbolName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(nsColor: style.foreground))
+                .frame(width: 30, height: 28)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Color(nsColor: style.border), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+        }
+        .buttonStyle(.plain)
+        .disabled(style.isDisabled)
+        .opacity(style.isDisabled ? 0.55 : 1)
+        .help("Show Changes")
     }
 
     private var connectionStatusButton: some View {
@@ -425,6 +454,40 @@ struct MainView: View {
         default:
             return "Connect"
         }
+    }
+}
+
+struct ChangesToggleButtonStyle {
+    let symbolName: String
+    let foreground: NSColor
+    let border: NSColor
+    let isDisabled: Bool
+
+    static func resolve(isOpen: Bool, hasChanges: Bool) -> ChangesToggleButtonStyle {
+        guard hasChanges else {
+            return ChangesToggleButtonStyle(
+                symbolName: "doc.text.magnifyingglass",
+                foreground: .tertiaryLabelColor,
+                border: NSColor.tertiaryLabelColor.withAlphaComponent(0.32),
+                isDisabled: true
+            )
+        }
+
+        if isOpen {
+            return ChangesToggleButtonStyle(
+                symbolName: "doc.text.magnifyingglass",
+                foreground: .controlAccentColor,
+                border: NSColor.controlAccentColor.withAlphaComponent(0.28),
+                isDisabled: false
+            )
+        }
+
+        return ChangesToggleButtonStyle(
+            symbolName: "doc.text.magnifyingglass",
+            foreground: .labelColor,
+            border: NSColor.labelColor.withAlphaComponent(0.22),
+            isDisabled: false
+        )
     }
 }
 
