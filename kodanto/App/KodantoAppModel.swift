@@ -42,6 +42,7 @@ final class KodantoAppModel {
     var showingDiagnostics = false
     var notification: String?
     var isTerminalPanelOpen = false
+    var isReviewPanelOpen = false
     var terminalPanelHeight: Double = TerminalLayoutState.default.height
 
     let workspaceStore: WorkspaceStore
@@ -253,6 +254,10 @@ final class KodantoAppModel {
 
     func toggleTerminalPanel() {
         setTerminalPanelOpen(!isTerminalPanelOpen)
+    }
+
+    func toggleReviewPanel() {
+        isReviewPanelOpen.toggle()
     }
 
     func setTerminalPanelOpen(_ isOpen: Bool) {

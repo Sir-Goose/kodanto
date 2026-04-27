@@ -88,6 +88,22 @@ final class SessionDetailStore {
     var selectedSessionTranscriptRevision = 0
     var sessionTodos: [OpenCodeTodo] = []
 
+    var reviewDiffs: [ReviewFileDiff] {
+        selectedSessionMessages.flatMap { message in
+            message.parts.flatMap { part -> [ReviewFileDiff] in
+                guard case .tool(let tool) = part else { return [] }
+                let patchFiles = tool.patchFiles.map(ReviewFileDiff.init)
+                let fileDiff = tool.fileDiff.map { ReviewFileDiff(fileDiff: $0) }
+                return patchFiles + (fileDiff.map { [$0] } ?? [])
+            }
+        }
+        .reduce(into: [String: ReviewFileDiff]()) { dict, diff in
+            dict[diff.filePath] = diff
+        }
+        .values
+        .sorted { $0.filePath < $1.filePath }
+    }
+
     private var selectedSessionID: String?
     private var state = SessionDetailMessageState()
 
