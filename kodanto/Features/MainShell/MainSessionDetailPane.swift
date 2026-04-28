@@ -13,7 +13,7 @@ struct MainSessionDetailPane: View {
     @State private var scrollPosition = ScrollPosition(edge: .bottom)
     @State private var isSlashPopoverVisible = false
     @State private var slashQuery = ""
-    @State private var sessionReviewStore = SessionReviewStore()
+    @State private var reviewExpandedFiles: Set<String> = []
 
     private static let composerHorizontalPadding: CGFloat = 8
     private static let composerVerticalPadding: CGFloat = 6
@@ -121,18 +121,14 @@ struct MainSessionDetailPane: View {
         .onChange(of: sessionDetailStore.selectedSessionMessages.count) { _, _ in
             syncSlashCommandContext()
         }
-        .onChange(of: sessionDetailStore.selectedSessionMessages.count) { _, _ in
-            sessionReviewStore.updateDiffs(
-                sessionDetailStore.reviewDiffs,
-                messageCount: sessionDetailStore.selectedSessionMessages.count
-            )
-        }
         .onChange(of: model.isReviewPanelOpen) { _, isOpen in
-            sessionReviewStore.isVisible = isOpen
+            if isOpen {
+                model.fileBrowserStore.setTab(.changes)
+            }
         }
-        .onChange(of: sessionReviewStore.isVisible) { _, isVisible in
-            if model.isReviewPanelOpen != isVisible {
-                model.isReviewPanelOpen = isVisible
+        .onChange(of: model.isFileBrowserPanelOpen) { _, isOpen in
+            if isOpen {
+                model.fileBrowserStore.setTab(.files)
             }
         }
     }
@@ -183,11 +179,17 @@ struct MainSessionDetailPane: View {
             .clipped()
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            if sessionReviewStore.isVisible {
+            let isFilePanelOpen = model.isReviewPanelOpen || model.isFileBrowserPanelOpen
+            if isFilePanelOpen {
                 Divider()
-                SessionReviewPanel(store: sessionReviewStore)
-                    .frame(width: 300)
-                    .frame(maxHeight: .infinity)
+                FileBrowserPanel(
+                    store: model.fileBrowserStore,
+                    reviewDiffs: sessionDetailStore.reviewDiffs,
+                    expandedFiles: $reviewExpandedFiles,
+                    onSelectFile: { _ in }
+                )
+                .frame(width: 300)
+                .frame(maxHeight: .infinity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

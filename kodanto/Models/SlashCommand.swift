@@ -119,6 +119,16 @@ extension SlashCommand {
             availability: .always
         ),
         SlashCommand(
+            id: "file.toggle",
+            trigger: "files",
+            title: "Toggle File Browser",
+            description: "Show or hide the file browser panel",
+            keybind: nil,
+            type: .builtin,
+            source: nil,
+            availability: .always
+        ),
+        SlashCommand(
             id: "file.open",
             trigger: "open",
             title: "Open File",

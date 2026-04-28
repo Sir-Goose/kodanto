@@ -57,6 +57,7 @@ protocol OpenCodeAPIService {
     func replyToPermission(requestID: String, directory: String, reply: String) async throws
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws
     func rejectQuestion(requestID: String, directory: String) async throws
+    func fileList(path: String, directory: String) async throws -> [FileNode]
 }
 
 protocol OpenCodeAPIServiceFactory {
