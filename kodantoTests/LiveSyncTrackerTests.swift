@@ -615,6 +615,8 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
     func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
     func undo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func revert(sessionID: String, messageID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
+    func unrevert(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
     func redo(sessionID: String, directory: String) async throws { fatalError("unused") }
     func compactSession(sessionID: String, directory: String, providerID: String, modelID: String) async throws { fatalError("unused") }
     func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
@@ -659,6 +661,7 @@ private final class ComposerAgentMockAPIService: OpenCodeAPIService {
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }
+    func fileList(path: String, directory: String) async throws -> [FileNode] { [] }
 }
 
 private final class SessionUnreadMockAPIService: OpenCodeAPIService {
@@ -681,6 +684,8 @@ private final class SessionUnreadMockAPIService: OpenCodeAPIService {
     func shareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
     func unshareSession(sessionID: String, directory: String) async throws -> OpenCodeSessionShare { fatalError("unused") }
     func undo(sessionID: String, directory: String) async throws { fatalError("unused") }
+    func revert(sessionID: String, messageID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
+    func unrevert(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
     func redo(sessionID: String, directory: String) async throws { fatalError("unused") }
     func compactSession(sessionID: String, directory: String, providerID: String, modelID: String) async throws { fatalError("unused") }
     func forkSession(sessionID: String, directory: String) async throws -> OpenCodeSession { fatalError("unused") }
@@ -723,6 +728,7 @@ private final class SessionUnreadMockAPIService: OpenCodeAPIService {
     func replyToPermission(requestID: String, directory: String, reply: String) async throws { fatalError("unused") }
     func replyToQuestion(requestID: String, directory: String, answers: [[String]]) async throws { fatalError("unused") }
     func rejectQuestion(requestID: String, directory: String) async throws { fatalError("unused") }
+    func fileList(path: String, directory: String) async throws -> [FileNode] { [] }
 }
 
 private struct SessionUnreadAPIServiceFactory: OpenCodeAPIServiceFactory {

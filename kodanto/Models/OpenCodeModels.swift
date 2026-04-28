@@ -1289,3 +1289,17 @@ struct PermissionReplyBody: Encodable {
 struct QuestionReplyBody: Encodable {
     let answers: [[String]]
 }
+
+struct FileNode: Decodable, Identifiable, Hashable {
+    let name: String
+    let path: String
+    let absolute: String
+    let type: String
+    let ignored: Bool
+
+    var id: String { path }
+
+    var isDirectory: Bool { type == "directory" }
+
+    var isFile: Bool { type == "file" }
+}

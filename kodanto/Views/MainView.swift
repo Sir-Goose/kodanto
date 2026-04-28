@@ -78,8 +78,9 @@ struct MainView: View {
             if let usage = model.sessionContextUsage {
                 contextUsageView(usage)
             }
-            terminalToggleButton
+            fileBrowserToggleButton
             changesToggleButton
+            terminalToggleButton
             connectionStatusButton
         }
     }
@@ -144,6 +145,34 @@ struct MainView: View {
         .disabled(!model.canShowTerminal)
         .opacity(model.canShowTerminal ? 1 : 0.55)
         .help("Toggle Terminal")
+    }
+
+    private var fileBrowserToggleButton: some View {
+        let style = FileBrowserToggleButtonStyle.resolve(
+            isOpen: model.isFileBrowserPanelOpen,
+            isEnabled: model.canShowFileBrowser
+        )
+
+        return Button {
+            model.toggleFileBrowserPanel()
+        } label: {
+            Image(systemName: style.symbolName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color(nsColor: style.foreground))
+                .frame(width: 30, height: 28)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .stroke(Color(nsColor: style.border), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
+                .padding(.top, 8)
+                .padding(.bottom, 6)
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.canShowFileBrowser)
+        .opacity(model.canShowFileBrowser ? 1 : 0.55)
+        .help("Toggle File Browser")
     }
 
     private var changesToggleButton: some View {
@@ -515,6 +544,36 @@ struct TerminalToggleButtonStyle {
 
         return TerminalToggleButtonStyle(
             symbolName: "rectangle.bottomthird.inset.filled",
+            foreground: .labelColor,
+            border: NSColor.labelColor.withAlphaComponent(0.22)
+        )
+    }
+}
+
+struct FileBrowserToggleButtonStyle {
+    let symbolName: String
+    let foreground: NSColor
+    let border: NSColor
+
+    static func resolve(isOpen: Bool, isEnabled: Bool) -> FileBrowserToggleButtonStyle {
+        if !isEnabled {
+            return FileBrowserToggleButtonStyle(
+                symbolName: "folder",
+                foreground: .tertiaryLabelColor,
+                border: NSColor.tertiaryLabelColor.withAlphaComponent(0.32)
+            )
+        }
+
+        if isOpen {
+            return FileBrowserToggleButtonStyle(
+                symbolName: "folder.fill",
+                foreground: .controlAccentColor,
+                border: NSColor.controlAccentColor.withAlphaComponent(0.28)
+            )
+        }
+
+        return FileBrowserToggleButtonStyle(
+            symbolName: "folder",
             foreground: .labelColor,
             border: NSColor.labelColor.withAlphaComponent(0.22)
         )
