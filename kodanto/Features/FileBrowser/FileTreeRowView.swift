@@ -55,7 +55,7 @@ struct FileTreeRowView: View {
                         .scaleEffect(0.7)
                 }
             }
-            .padding(.leading, CGFloat(row.depth * 14))
+            .padding(.leading, CGFloat(row.depth * 14) + 4)
             .padding(.trailing, 8)
             .padding(.vertical, 3)
             .contentShape(Rectangle())
@@ -82,7 +82,7 @@ struct FileTreeRowView: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.leading, CGFloat(row.depth * 14) + 12)
+            .padding(.leading, CGFloat(row.depth * 14) + 16)
             .padding(.trailing, 8)
             .padding(.vertical, 3)
             .contentShape(Rectangle())
