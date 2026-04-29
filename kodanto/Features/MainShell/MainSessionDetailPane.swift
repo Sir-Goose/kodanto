@@ -186,7 +186,10 @@ struct MainSessionDetailPane: View {
                     store: model.fileBrowserStore,
                     reviewDiffs: sessionDetailStore.reviewDiffs,
                     expandedFiles: $reviewExpandedFiles,
-                    onSelectFile: { _ in }
+                    onSelectFile: { fileNode in
+                        let url = URL(fileURLWithPath: fileNode.absolute)
+                        NSWorkspace.shared.open(url)
+                    }
                 )
                 .frame(width: 300)
                 .frame(maxHeight: .infinity)
