@@ -270,6 +270,12 @@ struct OpenCodeAPIClient {
         _ = try await requestNoContent(path: "/question/\(requestID)/reject", method: "POST", directory: directory)
     }
 
+    func fileList(path: String, directory: String) async throws -> [FileNode] {
+        try await request(path: "/file", directory: directory, queryItems: [
+            URLQueryItem(name: "path", value: path)
+        ])
+    }
+
     func ptyListRequest(directory: String) throws -> URLRequest {
         try makeRequest(path: "/pty", method: "GET", queryItems: [URLQueryItem(name: "directory", value: directory)])
     }

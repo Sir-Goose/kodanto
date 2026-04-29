@@ -43,6 +43,7 @@ final class KodantoAppModel {
     var notification: String?
     var isTerminalPanelOpen = false
     var isReviewPanelOpen = false
+    var isFileBrowserPanelOpen = false
     var terminalPanelHeight: Double = TerminalLayoutState.default.height
 
     let workspaceStore: WorkspaceStore
@@ -51,6 +52,7 @@ final class KodantoAppModel {
     let composerStore: ComposerStore
     let liveSyncCoordinator: LiveSyncCoordinator
     let terminalStore: TerminalStore
+    let fileBrowserStore: FileBrowserStore
 
     private let dependencies: KodantoAppDependencies
     private var connectTask: Task<Void, Never>?
@@ -74,6 +76,7 @@ final class KodantoAppModel {
             clock: dependencies.clock
         )
         terminalStore = TerminalStore(resumeStore: dependencies.terminalResumeStore)
+        fileBrowserStore = FileBrowserStore()
 
         profiles = dependencies.profileStore.load()
         if profiles.isEmpty {
@@ -239,6 +242,10 @@ final class KodantoAppModel {
         selectedProject != nil && selectedProfile != nil
     }
 
+    var canShowFileBrowser: Bool {
+        selectedProject != nil && selectedProfile != nil
+    }
+
     var canRefresh: Bool {
         connectionState.isConnected
     }
@@ -257,7 +264,38 @@ final class KodantoAppModel {
     }
 
     func toggleReviewPanel() {
-        isReviewPanelOpen.toggle()
+        if isFileBrowserPanelOpen {
+            if isReviewPanelOpen {
+                isReviewPanelOpen = false
+                isFileBrowserPanelOpen = false
+            } else {
+                isReviewPanelOpen = true
+                isFileBrowserPanelOpen = false
+            }
+        } else {
+            isReviewPanelOpen.toggle()
+        }
+    }
+
+    func toggleFileBrowserPanel() {
+        if isReviewPanelOpen {
+            if isFileBrowserPanelOpen {
+                isReviewPanelOpen = false
+                isFileBrowserPanelOpen = false
+            } else {
+                isFileBrowserPanelOpen = true
+                isReviewPanelOpen = false
+            }
+        } else {
+            isFileBrowserPanelOpen.toggle()
+        }
+
+        if isFileBrowserPanelOpen {
+            fileBrowserStore.setTab(.files)
+            Task {
+                try? await fileBrowserStore.loadDirectory("")
+            }
+        }
     }
 
     func setTerminalPanelOpen(_ isOpen: Bool) {
@@ -514,6 +552,7 @@ final class KodantoAppModel {
 
         do {
             let client = dependencies.apiFactory.makeService(profile: profile)
+            fileBrowserStore.setAPIService(client)
 
             if profile.kind == .localSidecar {
                 let installedVersion = try? dependencies.sidecar.executableVersion()
@@ -815,6 +854,8 @@ final class KodantoAppModel {
             handleFork()
         case "terminal.toggle":
             isTerminalPanelOpen.toggle()
+        case "file.toggle":
+            toggleFileBrowserPanel()
         case "file.open":
             break
         case "model.choose":
@@ -1287,6 +1328,7 @@ final class KodantoAppModel {
         terminalStore.setPersistenceScope(profileID: selectedProfileID)
         sessionRequestStore.updateSelection(sessionID: selectedSessionID, directory: selectedProject?.worktree)
         terminalStore.setActiveDirectory(selectedProject?.worktree)
+        fileBrowserStore.worktreeDirectory = selectedProject?.worktree
         ensureTerminalConnectedIfNeeded()
     }
 

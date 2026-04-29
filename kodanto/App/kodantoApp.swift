@@ -42,6 +42,11 @@ struct kodantoApp: App {
                     .keyboardShortcut("`", modifiers: [.control])
                     .disabled(!appModel.canShowTerminal)
 
+                    Button(appModel.isFileBrowserPanelOpen ? "Hide File Browser" : "Show File Browser") {
+                        appModel.toggleFileBrowserPanel()
+                    }
+                    .disabled(!appModel.canShowFileBrowser)
+
                     Button("Connections...") {
                         appModel.showingConnectionsManager = true
                     }
