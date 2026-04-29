@@ -160,11 +160,13 @@ struct MainSessionDetailPane: View {
         composerMaxHeight: CGFloat,
         availableHeight: CGFloat
     ) -> some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                header(for: session)
-                Divider()
+        let isFilePanelOpen = model.isReviewPanelOpen || model.isFileBrowserPanelOpen
 
+        return VStack(spacing: 0) {
+            header(for: session)
+            Divider()
+
+            HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     transcriptPanel
 
@@ -175,24 +177,23 @@ struct MainSessionDetailPane: View {
 
                     TerminalPanelView(model: model, availableHeight: availableHeight)
                 }
-            }
-            .clipped()
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .clipped()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-            let isFilePanelOpen = model.isReviewPanelOpen || model.isFileBrowserPanelOpen
-            if isFilePanelOpen {
-                Divider()
-                FileBrowserPanel(
-                    store: model.fileBrowserStore,
-                    reviewDiffs: sessionDetailStore.reviewDiffs,
-                    expandedFiles: $reviewExpandedFiles,
-                    onSelectFile: { fileNode in
-                        let url = URL(fileURLWithPath: fileNode.absolute)
-                        NSWorkspace.shared.open(url)
-                    }
-                )
-                .frame(width: 300)
-                .frame(maxHeight: .infinity)
+                if isFilePanelOpen {
+                    Divider()
+                    FileBrowserPanel(
+                        store: model.fileBrowserStore,
+                        reviewDiffs: sessionDetailStore.reviewDiffs,
+                        expandedFiles: $reviewExpandedFiles,
+                        onSelectFile: { fileNode in
+                            let url = URL(fileURLWithPath: fileNode.absolute)
+                            NSWorkspace.shared.open(url)
+                        }
+                    )
+                    .frame(width: 300)
+                    .frame(maxHeight: .infinity)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
