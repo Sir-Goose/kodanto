@@ -173,6 +173,9 @@ struct MainSidebarPane: View {
         .task(id: model.selectedProjectID) {
             guard let selectedProjectID = model.selectedProjectID else { return }
             expandedProjectIDs.insert(selectedProjectID)
+            if let project = model.projects.first(where: { $0.id == selectedProjectID }) {
+                model.loadSessionsIfNeeded(for: project)
+            }
         }
         .task {
             await runRecencyTicker()
