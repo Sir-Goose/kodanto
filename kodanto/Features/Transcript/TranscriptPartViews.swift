@@ -7,15 +7,16 @@ struct TranscriptPartView: View {
     let resolveTaskTarget: (String) -> KodantoAppModel.SessionNavigationTarget?
     let navigateToSession: (KodantoAppModel.SessionNavigationTarget) -> Void
     @Bindable var disclosureStore: TranscriptDisclosureStore
+    var fillsMarkdownWidth = true
 
     var body: some View {
         switch part {
         case .text(let value):
-            MarkdownText(text: value.text)
+            MarkdownText(text: value.text, fillsAvailableWidth: fillsMarkdownWidth)
                 .equatable()
                 .textSelection(.enabled)
         case .reasoning(let value):
-            MarkdownText(text: value.text)
+            MarkdownText(text: value.text, fillsAvailableWidth: fillsMarkdownWidth)
                 .equatable()
                 .font(.callout)
                 .foregroundStyle(.secondary)
