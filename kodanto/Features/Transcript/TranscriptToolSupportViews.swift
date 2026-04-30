@@ -192,24 +192,20 @@ struct ShellTranscriptBlock: View {
     @Binding var isExpanded: Bool
 
     private static let previewLineLimit = 4
+    private static let lineHeight: CGFloat = 18
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 0) {
                 if let command = tool.command, !command.isEmpty {
-                    HStack(alignment: .top, spacing: 6) {
-                        Text("$")
-                            .foregroundStyle(.tertiary)
-                            .fontWeight(.medium)
-                        Text(verbatim: command)
-                            .fontWeight(.semibold)
-                    }
-                    .font(.system(.caption, design: .monospaced))
-                    .textSelection(.enabled)
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(verbatim: "$ \(command)")
+                        .font(.system(.caption, design: .monospaced))
+                        .fontWeight(.semibold)
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if let output = tool.shellOutput, !output.isEmpty {
@@ -218,23 +214,12 @@ struct ShellTranscriptBlock: View {
 
                     if isExpanded {
                         ScrollView(.vertical, showsIndicators: true) {
-                            Text(verbatim: output)
-                                .font(.system(.caption, design: .monospaced))
-                                .textSelection(.enabled)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            outputLinesView(output)
                                 .padding(10)
                         }
                         .frame(maxHeight: 400)
                     } else {
-                        Text(verbatim: output
-                            .split(separator: "\n", omittingEmptySubsequences: false)
-                            .prefix(Self.previewLineLimit)
-                            .joined(separator: "\n"))
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .multilineTextAlignment(.leading)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        outputLinesView(output, limit: Self.previewLineLimit)
                             .padding(10)
                     }
                 }
@@ -250,6 +235,27 @@ struct ShellTranscriptBlock: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func outputLinesView(_ output: String, limit: Int? = nil) -> some View {
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        let displayLines = limit.map { lines.prefix($0) } ?? lines[...]
+
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(displayLines.enumerated()), id: \.offset) { _, line in
+                if line.isEmpty {
+                    Color.clear
+                        .frame(height: Self.lineHeight)
+                } else {
+                    Text(verbatim: String(line))
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.leading)
+                        .frame(maxWidth: .infinity, minHeight: Self.lineHeight, alignment: .topLeading)
+                }
+            }
+        }
     }
 
     private var hasOutput: Bool {
