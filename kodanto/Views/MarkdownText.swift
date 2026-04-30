@@ -3,10 +3,11 @@ import SwiftUI
 
 struct MarkdownText: View, Equatable {
     let text: String
+    var fillsAvailableWidth = true
 
     var body: some View {
         let blocks = MessageMarkdownRenderer.parseBlocks(text)
-        MarkdownBlocksStack(blocks: blocks, spacing: 12)
+        MarkdownBlocksStack(blocks: blocks, spacing: 12, fillsAvailableWidth: fillsAvailableWidth)
     }
 }
 
@@ -694,42 +695,44 @@ enum MessageMarkdownRenderer {
 private struct MarkdownBlocksStack: View {
     let blocks: [MessageMarkdownRenderer.Block]
     let spacing: CGFloat
+    let fillsAvailableWidth: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: spacing) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
-                MarkdownBlockView(block: block)
+                MarkdownBlockView(block: block, fillsAvailableWidth: fillsAvailableWidth)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
     }
 }
 
 private struct MarkdownBlockView: View {
     let block: MessageMarkdownRenderer.Block
+    let fillsAvailableWidth: Bool
 
     var body: some View {
         switch block {
         case .paragraph(let text):
             Text(text)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
         case .heading(let level, let text):
             Text(text)
                 .font(font(for: level))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
         case .horizontalRule:
             Rectangle()
                 .fill(Color.secondary.opacity(0.18))
-                .frame(maxWidth: .infinity, minHeight: 1, maxHeight: 1)
+                .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, minHeight: 1, maxHeight: 1)
         case .blockquote(let blocks):
             HStack(alignment: .top, spacing: 10) {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.25))
                     .frame(width: 3)
 
-                MarkdownBlocksStack(blocks: blocks, spacing: 8)
+                MarkdownBlocksStack(blocks: blocks, spacing: 8, fillsAvailableWidth: fillsAvailableWidth)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
         case .list(let items):
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
@@ -739,14 +742,14 @@ private struct MarkdownBlockView: View {
 
                         if item.blocks.isEmpty {
                             Text("")
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
                         } else {
-                            MarkdownBlocksStack(blocks: item.blocks, spacing: 8)
+                            MarkdownBlocksStack(blocks: item.blocks, spacing: 8, fillsAvailableWidth: fillsAvailableWidth)
                         }
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
         case .codeBlock(let language, let code):
             VStack(alignment: .leading, spacing: 8) {
                 if let language, !language.isEmpty {
@@ -770,7 +773,7 @@ private struct MarkdownBlockView: View {
                     .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
             .padding(12)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         case .table(let table):
@@ -811,7 +814,7 @@ private struct MarkdownBlockView: View {
                 }
                 .padding(2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: fillsAvailableWidth ? .infinity : nil, alignment: .leading)
             .padding(10)
             .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }

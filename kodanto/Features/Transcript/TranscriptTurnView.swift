@@ -66,44 +66,75 @@ private struct UserPromptCard: View {
     let worktreeRoot: String?
     let copyText: String?
     @State private var isHovered = false
+    @State private var availableWidth: CGFloat = 0
+
+    private var bubbleMaxWidth: CGFloat? {
+        guard availableWidth > 0 else { return nil }
+        return min(availableWidth * 0.82, 680)
+    }
 
     var body: some View {
         if !parts.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("You")
-                        .font(.headline)
+            VStack(alignment: .trailing, spacing: 6) {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
 
-                    ForEach(parts) { part in
-                        TranscriptPartView(
-                            part: part,
-                            worktreeRoot: worktreeRoot,
-                            resolveTaskTarget: { _ in nil },
-                            navigateToSession: { _ in },
-                            disclosureStore: TranscriptDisclosureStore()
-                        )
+                    if let bubbleMaxWidth {
+                        ViewThatFits(in: .horizontal) {
+                            bubble
+                            bubble.frame(width: bubbleMaxWidth, alignment: .leading)
+                        }
+                    } else {
+                        bubble
                     }
                 }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    Color.accentColor.opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear {
+                                availableWidth = proxy.size.width
+                            }
+                            .onChange(of: proxy.size.width) { _, width in
+                                availableWidth = width
+                            }
+                    }
                 )
 
                 CopyActionRow(
                     text: copyText,
                     isVisible: isHovered,
-                    helpText: "Copy prompt"
+                    helpText: "Copy prompt",
+                    alignment: .trailing
                 )
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .contentShape(Rectangle())
             .onHover { isHovered = $0 }
         }
+    }
+
+    private var bubble: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(parts) { part in
+                TranscriptPartView(
+                    part: part,
+                    worktreeRoot: worktreeRoot,
+                    resolveTaskTarget: { _ in nil },
+                    navigateToSession: { _ in },
+                    disclosureStore: TranscriptDisclosureStore(),
+                    fillsMarkdownWidth: false
+                )
+            }
+        }
+        .padding()
+        .background(
+            Color.accentColor.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 
@@ -111,19 +142,27 @@ private struct CopyActionRow: View {
     let text: String?
     let isVisible: Bool
     let helpText: String
+    var alignment: Alignment = .leading
 
     var body: some View {
         if text != nil {
             HStack(spacing: 0) {
+                if alignment == .trailing {
+                    Spacer(minLength: 0)
+                }
+
                 HoverCopyButton(
                     text: text,
                     isVisible: isVisible,
                     helpText: helpText
                 )
-                Spacer(minLength: 0)
+
+                if alignment != .trailing {
+                    Spacer(minLength: 0)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 24, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: alignment)
+            .frame(height: 24, alignment: alignment)
         }
     }
 }
