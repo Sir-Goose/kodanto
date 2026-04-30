@@ -191,35 +191,58 @@ struct ShellTranscriptBlock: View {
     let tool: OpenCodePart.Tool
     @Binding var isExpanded: Bool
 
+    private static let previewLineLimit = 4
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let command = tool.shellCommandOnlyTranscript {
-                Text(verbatim: command)
+            VStack(alignment: .leading, spacing: 0) {
+                if let command = tool.command, !command.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("$")
+                            .foregroundStyle(.tertiary)
+                            .fontWeight(.medium)
+                        Text(verbatim: command)
+                            .fontWeight(.semibold)
+                    }
                     .font(.system(.caption, design: .monospaced))
                     .textSelection(.enabled)
                     .multilineTextAlignment(.leading)
-                    .padding(10)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            }
-
-            if isExpanded, let transcript = tool.shellTranscript {
-                ScrollView([.horizontal, .vertical], showsIndicators: true) {
-                    Text(verbatim: transcript)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: true, vertical: true)
-                        .padding(10)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .frame(maxHeight: 360)
-                .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+                if let output = tool.shellOutput, !output.isEmpty {
+                    Divider()
+                        .padding(.horizontal, 10)
+
+                    if isExpanded {
+                        ScrollView(.vertical, showsIndicators: true) {
+                            Text(verbatim: output)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                        }
+                        .frame(maxHeight: 400)
+                    } else {
+                        Text(verbatim: output
+                            .split(separator: "\n", omittingEmptySubsequences: false)
+                            .prefix(Self.previewLineLimit)
+                            .joined(separator: "\n"))
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    }
+                }
             }
+            .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             if hasOutput, !tool.isPendingOrRunning {
-                Button(isExpanded ? "Hide output" : expandLabel) {
+                Button(isExpanded ? "Show less" : expandLabel) {
                     isExpanded.toggle()
                 }
                 .buttonStyle(.plain)
@@ -236,11 +259,12 @@ struct ShellTranscriptBlock: View {
 
     private var expandLabel: String {
         let lineCount = tool.shellOutputLineCount
-        if lineCount == 0 {
+        if lineCount <= Self.previewLineLimit {
             return "Show output"
         }
-        let noun = lineCount == 1 ? "line" : "lines"
-        return "Show \(lineCount) \(noun)"
+        let hiddenLines = lineCount - Self.previewLineLimit
+        let noun = hiddenLines == 1 ? "line" : "lines"
+        return "Show \(hiddenLines) more \(noun)"
     }
 }
 
