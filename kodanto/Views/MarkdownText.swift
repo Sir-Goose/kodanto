@@ -756,12 +756,18 @@ private struct MarkdownBlockView: View {
                 }
 
                 ScrollView(.horizontal, showsIndicators: true) {
-                    Text(verbatim: code)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: true, vertical: true)
-                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    Group {
+                        if let highlighted = SyntaxHighlighterService.shared.highlight(code, as: language) {
+                            Text(highlighted)
+                        } else {
+                            Text(verbatim: code)
+                        }
+                    }
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
