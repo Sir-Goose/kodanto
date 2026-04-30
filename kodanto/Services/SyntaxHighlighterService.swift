@@ -26,7 +26,7 @@ final class SyntaxHighlighterService {
     private func applyThemeForCurrentAppearance() {
         let isDark = NSApp.effectiveAppearance.name == .darkAqua
         guard isDark != lastThemeWasDark else { return }
-        let themeName = isDark ? "nord" : "xcode"
+        let themeName = isDark ? "atom-one-dark" : "xcode"
         highlighter?.setTheme(themeName)
         let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         highlighter?.theme.setCodeFont(font)
