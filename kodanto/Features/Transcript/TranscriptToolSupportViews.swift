@@ -226,7 +226,7 @@ struct ShellTranscriptBlock: View {
             }
             .background(Color(NSColor.textBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-            if hasOutput, !tool.isPendingOrRunning {
+            if hasOutput, !tool.isPendingOrRunning, tool.shellOutputLineCount > Self.previewLineLimit {
                 Button(isExpanded ? "Show less" : expandLabel) {
                     isExpanded.toggle()
                 }
@@ -264,11 +264,7 @@ struct ShellTranscriptBlock: View {
     }
 
     private var expandLabel: String {
-        let lineCount = tool.shellOutputLineCount
-        if lineCount <= Self.previewLineLimit {
-            return "Show output"
-        }
-        let hiddenLines = lineCount - Self.previewLineLimit
+        let hiddenLines = tool.shellOutputLineCount - Self.previewLineLimit
         let noun = hiddenLines == 1 ? "line" : "lines"
         return "Show \(hiddenLines) more \(noun)"
     }
